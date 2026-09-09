@@ -8,7 +8,7 @@
       "version": "0.1.0",
       "restore": {
         "projectUniqueName": "C:\\jason\\dev\\inillucent-clients\\csharp\\src\\Inillucent\\Inillucent.csproj",
-        "projectName": "Inillucent",
+        "projectName": "Inillucent.Client",
         "projectPath": "C:\\jason\\dev\\inillucent-clients\\csharp\\src\\Inillucent\\Inillucent.csproj",
         "packagesPath": "C:\\Users\\jason\\.nuget\\packages\\",
         "outputPath": "C:\\jason\\dev\\inillucent-clients\\csharp\\src\\Inillucent\\obj\\",

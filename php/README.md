@@ -13,7 +13,7 @@ ffi.enable=true
 ## Install
 
 ```sh
-composer require inillucent/inillucent
+composer require inillucent/client
 ```
 
 From a checkout of this repository, `php/autoload.php` registers the classes without Composer, which

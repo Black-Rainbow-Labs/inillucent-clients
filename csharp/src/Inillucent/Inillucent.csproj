@@ -9,7 +9,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-    <PackageId>Inillucent</PackageId>
+    <PackageId>Inillucent.Client</PackageId>
     <Version>0.1.0</Version>
     <Description>Client for the Inillucent embedded database, over its stable C ABI.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-import { connect, version, driverPath, UnsupportedError } from 'inillucent';
+import { connect, version, driverPath, UnsupportedError } from 'inillucent-client';
 
 test('an ES module import gives a working database', () => {
   const path = join(tmpdir(), `inillucent-esm-${process.pid}-${Date.now()}.rdb`);
@@ -64,7 +64,7 @@ test('an unsupported refusal arrives as its own error type', () => {
 });
 
 test('both entry points load the same driver from the same file', () => {
-  const required = createRequire(import.meta.url)('inillucent');
+  const required = createRequire(import.meta.url)('inillucent-client');
   assert.equal(required.version(), version());
   assert.equal(required.driverPath(), driverPath());
 });

@@ -4,7 +4,7 @@ The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, 
 from plain JavaScript.
 
 **This is the same npm package as [../typescript](../typescript), not a second implementation.**
-`inillucent` is written in TypeScript and published with three things beside each other: an ES module
+`inillucent-client` is written in TypeScript and published with three things beside each other: an ES module
 entry, a CommonJS entry, and type declarations. A JavaScript project installs that one package, calls
 it with `import` or with `require`, and gets editor completion from the declarations without writing
 any types itself. Shipping a second, untyped copy of the same binding would be a second thing to keep
@@ -16,7 +16,7 @@ tests that hold the CommonJS entry to the same standard as the ES module one.
 ## Install
 
 ```sh
-npm install inillucent
+npm install inillucent-client
 ```
 
 You also need the shared library. See [the shared library](../README.md#the-shared-library).
@@ -24,7 +24,7 @@ You also need the shared library. See [the shared library](../README.md#the-shar
 ## ES modules
 
 ```js
-import { connect } from 'inillucent';
+import { connect } from 'inillucent-client';
 
 const db = connect('app.rdb');
 
@@ -43,7 +43,7 @@ db.close();
 ## CommonJS
 
 ```js
-const { connect } = require('inillucent');
+const { connect } = require('inillucent-client');
 
 const db = connect('app.rdb');
 

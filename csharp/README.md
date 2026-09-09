@@ -8,7 +8,7 @@ Targets **.NET 8** and runs on anything newer. No dependencies.
 ## Install
 
 ```sh
-dotnet add package Inillucent
+dotnet add package Inillucent.Client
 ```
 
 You also need the shared library. See [the shared library](../README.md#the-shared-library).

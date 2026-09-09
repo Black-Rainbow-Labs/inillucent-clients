@@ -22,14 +22,14 @@ with inillucent.connect("app.rdb") as db:
 
 | | Install | Calls the ABI through | Needs a C compiler |
 |---|---|---|---|
-| [TypeScript](typescript/) | `npm install inillucent` | koffi | no |
-| [JavaScript](javascript/) | `npm install inillucent` | the same package, CommonJS or ESM | no |
+| [TypeScript](typescript/) | `npm install inillucent-client` | koffi | no |
+| [JavaScript](javascript/) | `npm install inillucent-client` | the same package, CommonJS or ESM | no |
 | [Python](python/) | `pip install inillucent-client` | ctypes, standard library only | no |
 | [Rust](rust/) | `cargo add inillucent-client` | libloading | no |
 | [Go](go/) | `go get github.com/jasonmcaffee/inillucent-clients/go` | purego, so cgo stays off | no |
-| [Java](java/) | `com.inillucent:inillucent`, Java 22 or later | the Foreign Function and Memory API | no |
-| [C#](csharp/) | `dotnet add package Inillucent` | `DllImport` with a resolver | no |
-| [PHP](php/) | `composer require inillucent/inillucent` | the FFI extension | no |
+| [Java](java/) | `com.inillucent:inillucent-client`, Java 22 or later | the Foreign Function and Memory API | no |
+| [C#](csharp/) | `dotnet add package Inillucent.Client` | `DllImport` with a resolver | no |
+| [PHP](php/) | `composer require inillucent/client` | the FFI extension | no |
 
 Each folder has its own README with the installation, a worked example, and the API in that
 language's own idiom.
@@ -37,6 +37,17 @@ language's own idiom.
 **No client needs a C compiler to install.** That was a constraint rather than a coincidence: a
 database client that only installs where a toolchain is already set up is a client most people
 cannot install.
+
+### Nothing is published yet
+
+**The install lines above are the names these packages will have. None of them is on npm, PyPI,
+crates.io, Maven Central, NuGet or Packagist today**, so running one of those commands right now
+fails. Until they are published, use the client from a checkout of this repository — each language's
+README says how, and `node scripts/test-all.mjs` proves all eight work from a checkout.
+
+The client is `inillucent-client` and not `inillucent` because **the engine already uses
+`inillucent`** for its command line tool on npm and on PyPI. Two different things under one name is
+the mistake that is expensive to undo after the first publish rather than before it.
 
 ---
 
@@ -67,7 +78,7 @@ yet" instead of "check your spelling", and `capabilities()` answers before you c
 rather than after.
 
 ```ts
-import { supports, Support } from 'inillucent';
+import { supports, Support } from 'inillucent-client';
 
 if (supports('cancel') !== Support.Yes) {
   // do not draw a Stop button

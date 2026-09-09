@@ -5,7 +5,7 @@
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { rmSync } = require('node:fs');
-const { connect, supports, Support, version, UnsupportedError } = require('inillucent');
+const { connect, supports, Support, version, UnsupportedError } = require('inillucent-client');
 
 const path = join(tmpdir(), `inillucent-cjs-quickstart-${process.pid}.rdb`);
 rmSync(path, { force: true });

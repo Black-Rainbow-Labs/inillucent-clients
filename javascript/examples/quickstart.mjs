@@ -7,7 +7,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
-import { connect, supports, Support, version, UnsupportedError } from 'inillucent';
+import { connect, supports, Support, version, UnsupportedError } from 'inillucent-client';
 
 const path = join(tmpdir(), `inillucent-js-quickstart-${process.pid}.rdb`);
 rmSync(path, { force: true });

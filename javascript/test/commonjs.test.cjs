@@ -22,7 +22,7 @@ const {
   supports,
   version,
   driverPath,
-} = require('inillucent');
+} = require('inillucent-client');
 
 const SUITE = resolve(__dirname, '..', '..', 'conformance', 'suite.json');
 

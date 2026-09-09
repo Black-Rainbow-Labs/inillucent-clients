@@ -11,7 +11,7 @@ is no JNI shim to build and no C compiler in your build.
 ```xml
 <dependency>
   <groupId>com.inillucent</groupId>
-  <artifactId>inillucent</artifactId>
+  <artifactId>inillucent-client</artifactId>
   <version>0.1.0</version>
 </dependency>
 ```

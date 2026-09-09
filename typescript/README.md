@@ -1,7 +1,7 @@
 # inillucent, from TypeScript
 
 The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process.
-Written in TypeScript and published with an ES module entry, a CommonJS entry and type declarations,
+Published as `inillucent-client`, written in TypeScript, with an ES module entry, a CommonJS entry and type declarations,
 so a JavaScript project installs exactly the same package. See [../javascript](../javascript) for
 the plain JavaScript form.
 
@@ -11,7 +11,7 @@ no C compiler and no build step of your own.
 ## Install
 
 ```sh
-npm install inillucent
+npm install inillucent-client
 ```
 
 From a checkout of this repository:
@@ -28,7 +28,7 @@ copy you ship yourself.
 ## A first program
 
 ```ts
-import { connect } from 'inillucent';
+import { connect } from 'inillucent-client';
 
 const db = connect('app.rdb');
 
@@ -47,7 +47,7 @@ db.close();
 database with it. Open the two separately when you want more than one connection on one file:
 
 ```ts
-import { Database } from 'inillucent';
+import { Database } from 'inillucent-client';
 
 const database = new Database('app.rdb');
 const first = database.connect();
@@ -143,7 +143,7 @@ first error has already undone everything. A transaction that is never committed
 ## When the engine refuses
 
 ```ts
-import { InillucentError, UnsupportedError } from 'inillucent';
+import { InillucentError, UnsupportedError } from 'inillucent-client';
 
 try {
   db.execute('SOME CONSTRUCT THE ENGINE HAS NOT BUILT');
@@ -161,7 +161,7 @@ than answering it wrongly, so an application can say "this engine cannot do that
 Ask first rather than after:
 
 ```ts
-import { capabilities, supports, Support } from 'inillucent';
+import { capabilities, supports, Support } from 'inillucent-client';
 
 if (supports('cancel') !== Support.Yes) {
   // do not draw a Stop button

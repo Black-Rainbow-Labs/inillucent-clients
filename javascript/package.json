@@ -10,6 +10,6 @@
     "test": "node --test test/commonjs.test.cjs test/esm.test.mjs"
   },
   "dependencies": {
-    "inillucent": "file:../typescript"
+    "inillucent-client": "file:../typescript"
   }
 }

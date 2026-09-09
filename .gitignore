@@ -1,0 +1,34 @@
+# The shared library is a build artifact of the engine, not source. `scripts/fetch-native`
+# puts it here; see native/README.md.
+native/*.dll
+native/*.so
+native/*.dylib
+native/*.lib
+native/*.a
+native/*.pdb
+
+# Scratch databases the tests open.
+*.rdb
+*.rdb-wal
+*.rdb-journal
+
+# Anything an agent produced while working a ticket.
+_agent_output/
+
+# Per-language build output.
+node_modules/
+typescript/dist/
+javascript/node_modules/
+__pycache__/
+*.py[cod]
+python/build/
+python/dist/
+python/*.egg-info/
+.pytest_cache/
+rust/target/
+go/bin/
+java/out/
+java/*.class
+csharp/bin/
+csharp/obj/
+php/vendor/

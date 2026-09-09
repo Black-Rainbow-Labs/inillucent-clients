@@ -1,0 +1,45 @@
+{
+  "name": "inillucent",
+  "version": "0.1.0",
+  "description": "Client for the Inillucent embedded database. Typed rows, exact result counts, and a refusal that names what the engine has not built.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/bundle-cjs.mjs",
+    "test": "npm run build && node --test test/conformance.test.js",
+    "conformance": "npm run build && node --test test/conformance.test.js"
+  },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0"
+  },
+  "keywords": [
+    "database",
+    "embedded",
+    "sql",
+    "sqlite",
+    "vector",
+    "inillucent"
+  ]
+}

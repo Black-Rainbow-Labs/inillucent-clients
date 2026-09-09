@@ -1,0 +1,15 @@
+{
+  "name": "inillucent-javascript-examples",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Using the inillucent client from plain JavaScript, in both module systems.",
+  "license": "MIT",
+  "scripts": {
+    "quickstart": "node examples/quickstart.mjs",
+    "quickstart:cjs": "node examples/quickstart.cjs",
+    "test": "node --test test/commonjs.test.cjs test/esm.test.mjs"
+  },
+  "dependencies": {
+    "inillucent": "file:../typescript"
+  }
+}

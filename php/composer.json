@@ -1,0 +1,20 @@
+{
+  "name": "inillucent/inillucent",
+  "description": "Client for the Inillucent embedded database, over its stable C ABI.",
+  "type": "library",
+  "license": "MIT",
+  "homepage": "https://github.com/jasonmcaffee/inillucent-clients",
+  "keywords": ["database", "embedded", "sql", "inillucent"],
+  "require": {
+    "php": ">=8.1",
+    "ext-ffi": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Inillucent\\": "src/"
+    }
+  },
+  "scripts": {
+    "conformance": "php tests/conformance.php"
+  }
+}

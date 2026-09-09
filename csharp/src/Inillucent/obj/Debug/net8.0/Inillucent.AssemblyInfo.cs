@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Client for the Inillucent embedded database, over its stable C ABI.")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+d04a9911eca5f58b5ca29f009f4e5f469a5bd01a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0+1f0ae3709e893cefc446f522bca189aad7b9d8df")]
 [assembly: System.Reflection.AssemblyProductAttribute("Inillucent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Inillucent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.1.0.0")]

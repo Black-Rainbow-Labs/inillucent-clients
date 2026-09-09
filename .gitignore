@@ -29,6 +29,6 @@ rust/target/
 go/bin/
 java/out/
 java/*.class
-csharp/bin/
-csharp/obj/
+csharp/**/bin/
+csharp/**/obj/
 php/vendor/

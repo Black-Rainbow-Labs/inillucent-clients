@@ -1,105 +1,225 @@
 # inillucent client libraries
 
 Client libraries for [inillucent](https://github.com/jasonmcaffee/inillucent), an embedded database
-written in Rust, in eight languages.
+written in Rust.
 
 There is no server. Your program opens a file, sends SQL to a library in the same process, and gets
 typed rows back.
 
-```python
-import inillucent
+```ts
+import { connect } from 'inillucent-client';
 
-with inillucent.connect("app.rdb") as db:
-    db.execute("CREATE TABLE note (id INTEGER PRIMARY KEY, body TEXT)")
-    db.execute("INSERT INTO note (body) VALUES (?1)", ["hello"])
-    for row in db.query("SELECT id, body FROM note"):
-        print(row["id"], row["body"])
+const db = connect('app.rdb');
+
+db.execute(`
+  CREATE TABLE person (
+    id         INTEGER PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name  TEXT NOT NULL,
+    email      TEXT,
+    age        INTEGER,
+    height_m   REAL
+  )
+`);
+
+db.execute(
+  'INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)',
+  ['Ada', 'Lovelace', 'ada@example.com', 36, 1.65],
+);
+
+for (const person of db.query('SELECT first_name, last_name, email FROM person')) {
+  console.log(person.first_name, person.last_name, person.email);
+}
+
+db.close();
+```
+
+```
+Ada Lovelace ada@example.com
 ```
 
 ---
 
-## The eight
+## Languages
 
-| | Install | Calls the ABI through | Needs a C compiler |
-|---|---|---|---|
-| [TypeScript](typescript/) | `npm install inillucent-client` | koffi | no |
-| [JavaScript](javascript/) | `npm install inillucent-client` | the same package, CommonJS or ESM | no |
-| [Python](python/) | `pip install inillucent-client` | ctypes, standard library only | no |
-| [Rust](rust/) | `cargo add inillucent-client` | libloading | no |
-| [Go](go/) | `go get github.com/jasonmcaffee/inillucent-clients/go` | purego, so cgo stays off | no |
-| [Java](java/) | `com.inillucent:inillucent-client`, Java 22 or later | the Foreign Function and Memory API | no |
-| [C#](csharp/) | `dotnet add package Inillucent.Client` | `DllImport` with a resolver | no |
-| [PHP](php/) | `composer require inillucent/client` | the FFI extension | no |
+| | Install | |
+|---|---|---|
+| **TypeScript** | `npm install inillucent-client` | [typescript/](typescript/) |
+| **JavaScript** | `npm install inillucent-client` | [javascript/](javascript/) |
+| **Python** | `pip install inillucent-client` | [python/](python/) |
+| **Rust** | `cargo add inillucent-client` | [rust/](rust/) |
+| **Go** | `go get github.com/jasonmcaffee/inillucent-clients/go` | [go/](go/) |
+| **Java** | `com.inillucent:inillucent-client` | [java/](java/) |
+| **C#** | `dotnet add package Inillucent.Client` | [csharp/](csharp/) |
+| **PHP** | `composer require inillucent/client` | [php/](php/) |
 
-Each folder has its own README with the installation, a worked example, and the API in that
-language's own idiom.
+Each folder has a README with a worked example and the API in that language's own idiom. The API is
+the same in all eight, so the sections below apply to every one of them.
 
-**No client needs a C compiler to install.** That was a constraint rather than a coincidence: a
-database client that only installs where a toolchain is already set up is a client most people
-cannot install.
-
-### Nothing is published yet
-
-**The install lines above are the names these packages will have. None of them is on npm, PyPI,
-crates.io, Maven Central, NuGet or Packagist today**, so running one of those commands right now
-fails. Until they are published, use the client from a checkout of this repository — each language's
-README says how, and `node scripts/test-all.mjs` proves all eight work from a checkout.
-
-The client is `inillucent-client` and not `inillucent` because **the engine already uses
-`inillucent`** for its command line tool on npm and on PyPI. Two different things under one name is
-the mistake that is expensive to undo after the first publish rather than before it.
+Every client also needs the engine's shared library. See [The shared library](#the-shared-library).
 
 ---
 
-## What every client agrees on
+## Reading rows
 
-The eight are not eight designs. They are eight spellings of one, and these four are the parts worth
-knowing before you read any of them.
-
-**Values stay typed.** `NULL`, integer, real, text and bytes arrive as the nearest thing the host
-language has, and `NULL` is never the empty string. A layer that drew them the same is a layer
-nobody can trust. In PHP, where one string type covers both text and bytes, a blob arrives as a
-`Blob` for the same reason.
-
-**`total` is exact.** A limit caps the rows handed back; `total` says how many the statement
-produced, counted rather than estimated, and `more` says whether the limit cut anything off. That is
-what lets a grid say `1 to 200 of 4,317` and mean it. The cost is that a query over a large table
-costs what the whole result costs, so put a `LIMIT` in your own SQL when you cannot afford that,
-where the planner can act on it.
-
-**A transaction is a handle you hold.** It is not a pair of calls, because the check on what a write
-did has to happen before the commit. A postcondition tested afterwards is a report about something
-that has already happened.
-
-**A refusal names what it refused.** This engine is deliberately incomplete in places and refuses
-what it has not built rather than answering it wrongly, so "not implemented" is a status of its own
-and a separate exception type in every client. An application can say "this engine cannot do that
-yet" instead of "check your spelling", and `capabilities()` answers before you compose a statement
-rather than after.
+`query` returns one object per row, keyed by column name.
 
 ```ts
-import { supports, Support } from 'inillucent-client';
-
-if (supports('cancel') !== Support.Yes) {
-  // do not draw a Stop button
+for (const person of db.query(
+  'SELECT id, first_name, last_name, email, age, height_m FROM person ORDER BY id',
+)) {
+  console.log(person.id, person.first_name, person.last_name, person.email, person.age);
 }
 ```
 
-An unknown capability name answers `unknown`, and you should treat that as no rather than as yes: a
-capability that was never declared was certainly never checked.
+```
+1 Ada Lovelace ada@example.com 36
+2 Grace Hopper null 85
+```
+
+`scalar` returns the first column of the first row, for a `COUNT` or a `MAX`:
+
+```ts
+db.scalar('SELECT COUNT(*) FROM person');    // 2
+```
+
+`execute` returns the full result when you want more than the rows:
+
+```ts
+const page = db.execute('SELECT id, first_name FROM person ORDER BY id', [], 20);
+
+page.columns;   // ['id', 'first_name']
+page.rows;      // [[1, 'Ada'], [2, 'Grace']]
+page.total;     // 2 — how many rows the statement produced
+page.more;      // false — whether the limit of 20 left any behind
+page.affected;  // null for a query, the row count for a write
+page.objects(); // the same rows keyed by column name
+```
+
+`total` is counted, not estimated, so a grid can show `1 to 20 of 4,317` and be right.
+
+## Writing rows
+
+Values go in as `?1`, `?2` and so on. They are bound, never pasted into the SQL text.
+
+```ts
+db.execute(
+  'INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)',
+  ['Grace', 'Hopper', null, 85, 1.57],
+);
+
+const changed = db.execute('UPDATE person SET email = ?1 WHERE last_name = ?2', [
+  'grace@example.com',
+  'Hopper',
+]);
+changed.affected;   // 1
+```
+
+To run the same statement many times, compile it once:
+
+```ts
+const insert = db.prepare(
+  'INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)',
+);
+for (const person of many) {
+  insert.execute([person.firstName, person.lastName, person.email, person.age, person.heightM]);
+}
+insert.close();
+```
+
+## Values
+
+| SQL | TypeScript | Python | Rust | Go | Java | C# | PHP |
+|---|---|---|---|---|---|---|---|
+| `NULL` | `null` | `None` | `Value::Null` | `nil` | `null` | `null` | `null` |
+| `INTEGER` | `number` | `int` | `Value::Integer` | `int64` | `Long` | `long` | `int` |
+| `REAL` | `number` | `float` | `Value::Real` | `float64` | `Double` | `double` | `float` |
+| `TEXT` | `string` | `str` | `Value::Text` | `string` | `String` | `string` | `string` |
+| `BLOB` | `Buffer` | `bytes` | `Value::Blob` | `[]byte` | `byte[]` | `byte[]` | `Blob` |
+
+`NULL` and the empty string are different values and stay different in every client. An integer too
+large for a JavaScript number comes back as a `bigint`.
+
+## Transactions
+
+A transaction is an object you hold open. Run the statements, look at how many rows each one
+changed, then commit or roll back.
+
+```ts
+const txn = db.transaction();
+const changed = txn.execute("UPDATE person SET age = age + 1 WHERE last_name = 'Hopper'");
+
+if (changed === 1) txn.commit();
+else txn.rollback();
+```
+
+If a statement inside the transaction fails, the transaction is rolled back before the error is
+thrown, so nothing is left half applied. A transaction that is never committed rolls back.
+
+## Errors
+
+Every failure carries a status, so you never have to match on the message text.
+
+```ts
+import { InillucentError, UnsupportedError } from 'inillucent-client';
+
+try {
+  db.execute('SELECT * FROM missing_table');
+} catch (why) {
+  if (why instanceof UnsupportedError) console.log('the engine has no', why.feature);
+  else if (why instanceof InillucentError) console.log(why.statusName);  // 'not_found'
+  else throw why;
+}
+```
+
+The statuses are `unsupported`, `syntax`, `not_found`, `constraint`, `readonly`, `busy`,
+`interrupted`, `corrupt`, `io`, `full`, `too_big`, `invalid_state` and `internal`.
+
+`unsupported` has its own error type because the engine is still being built out. When it has not
+implemented something, it says so and names the construct, instead of failing as though your SQL
+were wrong. You can also ask before you write the statement:
+
+```ts
+import { capabilities, supports, Support } from 'inillucent-client';
+
+supports('cancel');     // Support.No, so do not draw a Stop button
+capabilities();         // every feature the engine declares, with a note on each
+```
 
 ---
 
-## How correctness is decided
+## The shared library
 
-Every client is graded by [`conformance/suite.json`](conformance/suite.json), which is the driver's
-behaviour written as data rather than as prose. It is the same file the engine's own Rust driver
-runs, so a client here is correct in the sense that it **agrees with the engine**, not in the sense
-that somebody wrote tests for it.
+Every client calls one shared library built from the engine:
+`inillucent_driver_capi.dll` on Windows, `libinillucent_driver_capi.so` on Linux,
+`libinillucent_driver_capi.dylib` on macOS.
+
+Build it from an engine checkout and copy it into `native/`:
+
+```sh
+cargo build --release --manifest-path <engine>/Cargo.toml -p inillucent-driver-capi
+node scripts/fetch-native.mjs
+```
+
+Every client looks in the same four places, in order:
+
+1. `INILLUCENT_DRIVER_LIB`, a full path. Set this to point at a copy you ship yourself.
+2. `native/` in this repository.
+3. An engine checkout beside this one, `target/release` then `target/debug`.
+4. The operating system's library search path.
+
+If none of them has it, the error lists all four.
+
+[`native/inillucent_driver.h`](native/inillucent_driver.h) is the C header, so a C or C++ program
+can compile against the same ABI.
+
+## Tests
+
+Every client is graded by [`conformance/suite.json`](conformance/suite.json), the same file the
+engine's own Rust driver runs. A client passes when it agrees with the engine.
 
 ```
 $ node scripts/test-all.mjs
-inillucent client libraries, conformance in every language
 
   ok    python      ctypes
   ok    typescript  koffi
@@ -113,88 +233,10 @@ inillucent client libraries, conformance in every language
 8 of 8 clients pass
 ```
 
-A language whose toolchain is not on the machine is reported as **skipped**, never as passing.
+A language with no toolchain on the machine is reported as skipped.
 
-That the suite is shared rather than per language is not a tidiness argument. It found a real defect
-in two clients while they were being written, and both had the same cause: the C ABI reads a null
-value pointer as `NULL`, deliberately, and both koffi and Go hand a zero length buffer across as a
-null pointer. So binding `''` stored `NULL` instead of the empty string, in two languages at once.
-The case that caught it is called `null_is_not_the_empty_string`. A test suite written per client
-would have carried the same wrong assumption into the test.
-
----
-
-## The shared library
-
-Every client calls one shared library, built from the engine:
-
-| Platform | File |
-|---|---|
-| Windows | `inillucent_driver_capi.dll` |
-| Linux | `libinillucent_driver_capi.so` |
-| macOS | `libinillucent_driver_capi.dylib` |
-
-Build it from an engine checkout and copy it into `native/`:
-
-```sh
-cargo build --release --manifest-path <engine>/Cargo.toml -p inillucent-driver-capi
-node scripts/fetch-native.mjs
-```
-
-Every client looks for it in the same four places, in this order, so an application that works in
-one language works in the rest:
-
-1. **`INILLUCENT_DRIVER_LIB`** — a full path. This wins whenever it is set, and it is how a
-   deployment points at a copy it ships itself.
-2. **`native/`** in this repository, for a checkout.
-3. The engine's `target/release` then `target/debug`, for a checkout beside the engine.
-4. The operating system's own library search path.
-
-A client that finds nothing names all four places in the error rather than saying file not found,
-because "which of the four did you mean" is the only question that message otherwise leaves you
-with.
-
-Every client also reads `inillucent_abi_version()` at load and refuses a **major** mismatch by name,
-before it calls anything else. A minor bump adds symbols and is accepted; a major bump moves one,
-and calling a function whose signature has moved does not fail in a way anybody can read.
-
-[`native/inillucent_driver.h`](native/inillucent_driver.h) is the contract, copied from the engine so
-a C or C++ program can compile against it without cloning the engine.
-
----
-
-## Running the tests
-
-`node scripts/test-all.mjs` runs all eight. One at a time:
-
-| | |
-|---|---|
-| Python | `python python/tests/conformance.py` (with `PYTHONPATH=python/src`) |
-| TypeScript | `npm --prefix typescript test` |
-| JavaScript | `npm --prefix javascript test` |
-| Rust | `cargo test --manifest-path rust/Cargo.toml` |
-| Go | `go test ./...` in `go/` |
-| Java | `javac` the sources, then `java com.inillucent.ConformanceTest` — see [java/README.md](java/README.md) |
-| C# | `dotnet run` in `csharp/test/Inillucent.Conformance` |
-| PHP | `php php/tests/conformance.php` |
-
-Each one prints a line per case and exits non zero on a disagreement.
-
----
-
-## Writing a ninth
-
-The C ABI is documented in the engine repository, in
-[`drivers/README.md`](https://github.com/jasonmcaffee/inillucent/blob/main/drivers/README.md), and
-that file plus the header is meant to be enough on its own. The shape is the same every time: check
-the ABI major at load, wrap each opaque pointer in the host language's own resource type, check the
-status after every call that takes an error out parameter and free the error in a `finally`, map
-"unsupported" to its own type, copy every string on the way out, and then run the suite.
-
-The clients here are ordered by how little machinery they need, so read
-[Python](python/src/inillucent/) first: it is `ctypes` and nothing else.
-
----
+The [`examples/`](examples/) folder describes the person program each README shows, and each client
+has its own copy that runs.
 
 ## Licence
 

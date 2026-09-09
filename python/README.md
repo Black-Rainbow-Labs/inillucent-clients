@@ -21,20 +21,52 @@ copy you ship yourself.
 
 ## A first program
 
+Create a table, insert rows, read them back, and update one.
+[`examples/person.py`](examples/person.py) is this program and it runs.
+
 ```python
 import inillucent
 
 with inillucent.connect("app.rdb") as db:
-    db.execute("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, rating REAL)")
-    db.execute("INSERT INTO authors VALUES (?1, ?2, ?3)", [1, "Octavia Butler", 4.8])
-    db.execute("INSERT INTO authors VALUES (?1, ?2, ?3)", [2, "Ursula Le Guin", None])
+    db.execute("""
+        CREATE TABLE person (
+          id         INTEGER PRIMARY KEY,
+          first_name TEXT NOT NULL,
+          last_name  TEXT NOT NULL,
+          email      TEXT,
+          age        INTEGER,
+          height_m   REAL
+        )
+    """)
 
-    for author in db.query("SELECT id, name, rating FROM authors ORDER BY id"):
-        print(author["id"], author["name"], author["rating"])
+    insert = ("INSERT INTO person (first_name, last_name, email, age, height_m) "
+              "VALUES (?1, ?2, ?3, ?4, ?5)")
+    db.execute(insert, ["Ada", "Lovelace", "ada@example.com", 36, 1.65])
+    db.execute(insert, ["Grace", "Hopper", None, 85, 1.57])
+
+    for person in db.query("SELECT id, first_name, last_name, email, age, height_m "
+                           "FROM person ORDER BY id"):
+        print(person["id"], person["first_name"], person["last_name"],
+              person["email"], person["age"], person["height_m"])
+
+    print("people:", db.scalar("SELECT COUNT(*) FROM person"))
+
+    changed = db.execute("UPDATE person SET email = ?1 WHERE last_name = ?2",
+                         ["grace@example.com", "Hopper"])
+    print("updated:", changed.affected)
+    print("email now:", db.scalar("SELECT email FROM person WHERE last_name = ?1", ["Hopper"]))
 ```
 
-`connect()` opens the file and hands back a connection that owns it, so closing the connection
-closes the database. Open the two separately when you want more than one connection on one file:
+```
+1 Ada Lovelace ada@example.com 36 1.65
+2 Grace Hopper None 85 1.57
+people: 2
+updated: 1
+email now: grace@example.com
+```
+
+`connect()` opens the file and returns a connection that owns it, so closing the connection closes
+the database. Open the two separately when you want more than one connection on one file:
 
 ```python
 database = inillucent.Database("app.rdb")
@@ -44,35 +76,46 @@ second = database.connect()
 database.close()   # closes both connections, then the file
 ```
 
-## Reading results
+## Reading rows
 
-`execute()` returns a `Rows`. It is materialised and copied into Python, so it stays usable after
-the call that made it.
+`query()` gives a dict per row, keyed by column name. That is what you want most of the time.
 
 ```python
-rows = db.execute("SELECT id, name FROM authors ORDER BY id", [], 200)
+people = db.query("SELECT first_name, last_name, email FROM person ORDER BY id")
 
-rows.columns        # ['id', 'name']
-rows.column_types   # ['INTEGER', 'TEXT'] — '' for an expression, which has no declared type
-rows.rows           # [[1, 'Octavia Butler'], [2, 'Ursula Le Guin']]
-rows.total          # how many the statement produced, exactly
-rows.more           # whether the limit of 200 cut anything off
-rows.affected       # None for a query; the count for a write
+people[0]["first_name"]   # 'Ada'
+people[0]["last_name"]    # 'Lovelace'
+people[0]["email"]        # 'ada@example.com'
+people[1]["email"]        # None - the column is NULL, and None is not ''
+```
+
+`scalar()` gives the first column of the first row, for a COUNT, a MAX, or one field:
+
+```python
+db.scalar("SELECT COUNT(*) FROM person")                                  # 2
+db.scalar("SELECT email FROM person WHERE last_name = ?1", ["Lovelace"])  # 'ada@example.com'
+```
+
+`execute()` gives the whole result when you need more than the rows:
+
+```python
+rows = db.execute("SELECT id, first_name, last_name FROM person ORDER BY id", [], 200)
+
+rows.columns        # ['id', 'first_name', 'last_name']
+rows.column_types   # ['INTEGER', 'TEXT', 'TEXT'] - '' for an expression, which has no declared type
+rows.rows           # [[1, 'Ada', 'Lovelace'], [2, 'Grace', 'Hopper']]
+rows.total          # 2 - how many rows the statement produced
+rows.more           # False - whether the limit of 200 left any behind
+rows.affected       # None for a query; the row count for a write
 rows.tag            # 'SELECT 2'
 
-rows.objects()      # [{'id': 1, 'name': 'Octavia Butler'}, ...]
-rows.one()          # the first row, or None
-rows.scalar()       # the first column of the first row
-rows.column("name") # ['Octavia Butler', 'Ursula Le Guin']
+rows.objects()            # [{'id': 1, 'first_name': 'Ada', ...}, ...]
+rows.one()                # the first row, or None
+rows.scalar()             # the first column of the first row
+rows.column("last_name")  # ['Lovelace', 'Hopper']
 ```
 
-`query()` is `execute(...).objects()` and `scalar()` is the one value, because unwrapping a `COUNT`
-out of two lists is a cost you would otherwise pay on every line:
-
-```python
-db.query("SELECT id, name FROM authors")     # list of dicts
-db.scalar("SELECT COUNT(*) FROM authors")    # 2
-```
+`total` is counted, not estimated, so a grid can show `1 to 200 of 4,317` and be right.
 
 ## Values
 
@@ -93,24 +136,25 @@ than being converted, because converting it would be this library deciding what 
 Parameters are `?1`, `?2` and so on, bound in order and never pasted into the text:
 
 ```python
-db.execute("SELECT * FROM authors WHERE rating > ?1 AND name LIKE ?2", [4.0, "O%"])
+db.execute("SELECT * FROM person WHERE age > ?1 AND last_name LIKE ?2", [40, "L%"])
 ```
 
 Compile once and run many times with `prepare`:
 
 ```python
-with db.prepare("INSERT INTO authors VALUES (?1, ?2, ?3)") as insert:
-    for author in many:
-        insert.execute([author.id, author.name, author.rating])
+with db.prepare("INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)") as insert:
+    for person in many:
+        insert.execute([person.first_name, person.last_name, person.email, person.age, person.height_m])
 ```
 
 ## Transactions
 
-A transaction is a handle you hold, so what a write did can be checked **before** the commit:
+A transaction is an object you hold open. Run the statements, look at how many rows each one
+changed, then commit or roll back:
 
 ```python
 with db.transaction() as txn:
-    changed = txn.execute("UPDATE authors SET rating = rating + 0.1 WHERE rating IS NOT NULL")
+    changed = txn.execute("UPDATE person SET age = age + 1 WHERE last_name = 'Hopper'")
     if changed != expected:
         txn.rollback()          # or just raise; the context manager rolls back
 ```

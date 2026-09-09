@@ -5,8 +5,8 @@ Published as `inillucent-client`, written in TypeScript, with an ES module entry
 so a JavaScript project installs exactly the same package. See [../javascript](../javascript) for
 the plain JavaScript form.
 
-Calls go through [koffi](https://koffi.dev), which ships prebuilt binaries, so installing this needs
-no C compiler and no build step of your own.
+Calls go through [koffi](https://koffi.dev), which ships prebuilt binaries, so `npm install` has
+nothing to build.
 
 ## Install
 
@@ -27,24 +27,58 @@ copy you ship yourself.
 
 ## A first program
 
+Create a table, insert rows, read them back, and update one.
+[`examples/person.ts`](examples/person.ts) is this program and it runs.
+
 ```ts
 import { connect } from 'inillucent-client';
 
 const db = connect('app.rdb');
 
-db.execute('CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, rating REAL)');
-db.execute('INSERT INTO authors VALUES (?1, ?2, ?3)', [1, 'Octavia Butler', 4.8]);
-db.execute('INSERT INTO authors VALUES (?1, ?2, ?3)', [2, 'Ursula Le Guin', null]);
+db.execute(`
+  CREATE TABLE person (
+    id         INTEGER PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name  TEXT NOT NULL,
+    email      TEXT,
+    age        INTEGER,
+    height_m   REAL
+  )
+`);
 
-for (const author of db.query('SELECT id, name, rating FROM authors ORDER BY id')) {
-  console.log(author.id, author.name, author.rating);
+const insert =
+  'INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)';
+db.execute(insert, ['Ada', 'Lovelace', 'ada@example.com', 36, 1.65]);
+db.execute(insert, ['Grace', 'Hopper', null, 85, 1.57]);
+
+for (const person of db.query(
+  'SELECT id, first_name, last_name, email, age, height_m FROM person ORDER BY id',
+)) {
+  console.log(person.id, person.first_name, person.last_name, person.email, person.age, person.height_m);
 }
+
+console.log('people:', db.scalar('SELECT COUNT(*) FROM person'));
+
+const changed = db.execute('UPDATE person SET email = ?1 WHERE last_name = ?2', [
+  'grace@example.com',
+  'Hopper',
+]);
+console.log('updated:', changed.affected);
+console.log('email now:', db.scalar('SELECT email FROM person WHERE last_name = ?1', ['Hopper']));
 
 db.close();
 ```
 
-`connect()` opens the file and hands back a `Connection` that owns it, so `close()` closes the
-database with it. Open the two separately when you want more than one connection on one file:
+```
+1 Ada Lovelace ada@example.com 36 1.65
+2 Grace Hopper null 85 1.57
+people: 2
+updated: 1
+email now: grace@example.com
+```
+
+`connect()` opens the file and returns a `Connection` that owns it, so `close()` closes the database
+with it. Open the two separately when you want more than one connection on one file:
 
 ```ts
 import { Database } from 'inillucent-client';
@@ -59,34 +93,46 @@ database.close();   // closes both connections, then the file
 Both are `Symbol.dispose`, so `using db = connect('app.rdb')` works where your TypeScript target
 supports explicit resource management.
 
-## Reading results
+## Reading rows
 
-`execute()` returns `Rows`. It is materialised and copied into JavaScript, so it stays usable after
-the call that made it.
+`query()` gives one object per row, keyed by column name. That is what you want most of the time.
 
 ```ts
-const rows = db.execute('SELECT id, name FROM authors ORDER BY id', [], 200);
+const people = db.query('SELECT first_name, last_name, email FROM person ORDER BY id');
 
-rows.columns        // ['id', 'name']
-rows.columnTypes    // ['INTEGER', 'TEXT'] — '' for an expression, which has no declared type
-rows.rows           // [[1, 'Octavia Butler'], [2, 'Ursula Le Guin']]
-rows.total          // how many the statement produced, exactly
-rows.more           // whether the limit of 200 cut anything off
-rows.affected       // null for a query; the count for a write
+people[0].first_name;   // 'Ada'
+people[0].last_name;    // 'Lovelace'
+people[0].email;        // 'ada@example.com'
+people[1].email;        // null — the column is NULL, and null is not ''
+```
+
+`scalar()` gives the first column of the first row, for a `COUNT`, a `MAX`, or one field:
+
+```ts
+db.scalar('SELECT COUNT(*) FROM person');                                  // 2
+db.scalar('SELECT email FROM person WHERE last_name = ?1', ['Lovelace']);  // 'ada@example.com'
+```
+
+`execute()` gives the whole result when you need more than the rows:
+
+```ts
+const rows = db.execute('SELECT id, first_name, last_name FROM person ORDER BY id', [], 200);
+
+rows.columns        // ['id', 'first_name', 'last_name']
+rows.columnTypes    // ['INTEGER', 'TEXT', 'TEXT'] — '' for an expression, which has no declared type
+rows.rows           // [[1, 'Ada', 'Lovelace'], [2, 'Grace', 'Hopper']]
+rows.total          // 2 — how many rows the statement produced
+rows.more           // false — whether the limit of 200 left any behind
+rows.affected       // null for a query; the row count for a write
 rows.tag            // 'SELECT 2'
 
-rows.objects()      // [{ id: 1, name: 'Octavia Butler' }, ...]
-rows.one()          // the first row, or undefined
-rows.scalar()       // the first column of the first row
-rows.column('name') // ['Octavia Butler', 'Ursula Le Guin']
+rows.objects()            // [{ id: 1, first_name: 'Ada', last_name: 'Lovelace' }, ...]
+rows.one()                // the first row, or undefined
+rows.scalar()             // the first column of the first row
+rows.column('last_name')  // ['Lovelace', 'Hopper']
 ```
 
-`query()` is `execute(...).objects()` and `scalar()` is the one value:
-
-```ts
-db.query('SELECT id, name FROM authors');     // RowObject[]
-db.scalar('SELECT COUNT(*) FROM authors');    // 2
-```
+`total` is counted, not estimated, so a grid can show `1 to 200 of 4,317` and be right.
 
 `Rows` is iterable, so `for (const row of rows)` walks the arrays.
 
@@ -112,15 +158,16 @@ the integer 4.
 Parameters are `?1`, `?2` and so on, bound in order and never pasted into the text:
 
 ```ts
-db.execute('SELECT * FROM authors WHERE rating > ?1 AND name LIKE ?2', [4.0, 'O%']);
+db.execute('SELECT * FROM person WHERE age > ?1 AND last_name LIKE ?2', [40, 'L%']);
 ```
 
 Compile once and run many times with `prepare`:
 
 ```ts
-const insert = db.prepare('INSERT INTO authors VALUES (?1, ?2, ?3)');
+const insert = db.prepare('INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)');
 try {
-  for (const author of many) insert.execute([author.id, author.name, author.rating]);
+  for (const person of many)
+    insert.execute([person.firstName, person.lastName, person.email, person.age, person.heightM]);
 } finally {
   insert.close();
 }
@@ -128,11 +175,12 @@ try {
 
 ## Transactions
 
-A transaction is a handle you hold, so what a write did can be checked **before** the commit:
+A transaction is an object you hold open. Run the statements, look at how many rows each one
+changed, then commit or roll back:
 
 ```ts
 const txn = db.transaction();
-const changed = txn.execute('UPDATE authors SET rating = rating + 0.1 WHERE rating IS NOT NULL');
+const changed = txn.execute('UPDATE person SET age = age + 1 WHERE last_name = 'Hopper'');
 if (changed === expected) txn.commit();
 else txn.rollback();
 ```

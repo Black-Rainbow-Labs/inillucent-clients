@@ -32,53 +32,126 @@ You also need the shared library. See [the shared library](../README.md#the-shar
 
 ## A first program
 
+Create a table, insert rows, read them back, and update one.
+[`examples/person.rs`](examples/person.rs) is this program and it runs.
+
 ```rust
 use inillucent::{Database, Value};
 
 let database = Database::open("app.rdb")?;
 let connection = database.connect()?;
 
-connection.run("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, rating REAL)")?;
-connection.execute(
-    "INSERT INTO authors VALUES (?1, ?2, ?3)",
-    &[Value::Integer(1), Value::from("Octavia Butler"), Value::Real(4.8)],
-    None,
+connection.run(
+    "CREATE TABLE person (
+       id         INTEGER PRIMARY KEY,
+       first_name TEXT NOT NULL,
+       last_name  TEXT NOT NULL,
+       email      TEXT,
+       age        INTEGER,
+       height_m   REAL
+     )",
 )?;
 
-let rows = connection.run("SELECT id, name, rating FROM authors ORDER BY id")?;
-for row in &rows {
-    println!("{} {} {}", row[0], row[1], row[2]);
+let mut insert = connection.prepare(
+    "INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)",
+)?;
+insert.execute(
+    &[Value::from("Ada"), Value::from("Lovelace"), Value::from("ada@example.com"),
+      Value::Integer(36), Value::Real(1.65)],
+    None,
+)?;
+insert.execute(
+    &[Value::from("Grace"), Value::from("Hopper"), Value::Null,
+      Value::Integer(85), Value::Real(1.57)],
+    None,
+)?;
+drop(insert);
+
+let rows = connection.run(
+    "SELECT id, first_name, last_name, email, age, height_m FROM person ORDER BY id",
+)?;
+for nth in 0..rows.len() {
+    println!(
+        "{} {} {} {} {} {}",
+        rows.get(nth, "id").unwrap(),
+        rows.get(nth, "first_name").unwrap(),
+        rows.get(nth, "last_name").unwrap(),
+        rows.get(nth, "email").unwrap(),
+        rows.get(nth, "age").unwrap(),
+        rows.get(nth, "height_m").unwrap(),
+    );
 }
+
+println!("people: {}", connection.scalar("SELECT COUNT(*) FROM person", &[])?.unwrap());
+
+let changed = connection.execute(
+    "UPDATE person SET email = ?1 WHERE last_name = ?2",
+    &[Value::from("grace@example.com"), Value::from("Hopper")],
+    None,
+)?;
+println!("updated: {}", changed.affected.unwrap_or(0));
 # Ok::<(), inillucent::Error>(())
 ```
 
-`run(sql)` is `execute(sql, &[], None)`, for the common case of a statement with nothing bound.
+```
+1 Ada Lovelace ada@example.com 36 1.65
+2 Grace Hopper NULL 85 1.57
+people: 2
+updated: 1
+email now: grace@example.com
+```
+
+`run(sql)` is `execute(sql, &[], None)`, for a statement with nothing bound.
 
 A `Connection` borrows its `Database`, so the compiler enforces the order the C ABI requires: the
 database cannot be closed while a connection on it is alive. `Statement` and `Transaction` borrow
 their `Connection` the same way.
 
-## Reading results
+## Reading rows
 
-`Rows` is materialised and owned, so it outlives the statement that made it.
+`get` takes the column name, so the order of the SELECT does not have to be carried in your head.
 
 ```rust
-let rows = connection.execute("SELECT id, name FROM authors ORDER BY id", &[], Some(200))?;
+let rows = connection.run("SELECT first_name, last_name, email FROM person ORDER BY id")?;
 
-rows.columns          // ["id", "name"]
-rows.column_types     // ["INTEGER", "TEXT"] — "" for an expression
+rows.get(0, "first_name");   // Some(Value::Text("Ada"))
+rows.get(0, "last_name");    // Some(Value::Text("Lovelace"))
+rows.get(1, "email");        // Some(Value::Null) - the column is NULL
+
+// Read one out as the type it is.
+let first = rows.get(0, "first_name").and_then(Value::as_text).unwrap_or("");
+let age = rows.get(0, "age").and_then(Value::as_integer);
+# Ok::<(), inillucent::Error>(())
+```
+
+`scalar` gives the first column of the first row, for a COUNT, a MAX, or one field:
+
+```rust
+connection.scalar("SELECT COUNT(*) FROM person", &[])?;
+connection.scalar("SELECT email FROM person WHERE last_name = ?1", &[Value::from("Lovelace")])?;
+# Ok::<(), inillucent::Error>(())
+```
+
+## The whole result
+
+```rust
+let rows = connection.execute("SELECT id, first_name FROM person ORDER BY id", &[], Some(200))?;
+
+rows.columns          // ["id", "first_name"]
+rows.column_types     // ["INTEGER", "TEXT"] - "" for an expression
 rows.rows             // Vec<Vec<Value>>
-rows.total            // how many the statement produced, exactly
-rows.more             // whether the limit of 200 cut anything off
+rows.total            // 2 - how many rows the statement produced
+rows.more             // false - whether the limit of 200 left any behind
 rows.affected         // None for a query; Some(n) for a write
 rows.tag              // "SELECT 2"
 
 rows.one();                    // Option<&Vec<Value>>
 rows.scalar();                 // Option<&Value>
-rows.get(0, "name");           // Option<&Value>, by row and column name
-rows.column_index("name");     // Option<usize>
+rows.column_index("email");    // Option<usize>
 # Ok::<(), inillucent::Error>(())
 ```
+
+`total` is counted, not estimated, so a grid can show `1 to 200 of 4,317` and be right.
 
 ## Values
 
@@ -93,11 +166,12 @@ so `Value::from("Ada")` and `Value::from(None::<i64>)` both work, and `as_intege
 
 ## Transactions
 
-A transaction is a handle you hold, so what a write did can be checked **before** the commit:
+A transaction is an object you hold open. Run the statements, look at how many rows each one
+changed, then commit or roll back:
 
 ```rust
 let mut transaction = connection.transaction()?;
-let changed = transaction.execute("UPDATE authors SET rating = rating + 0.1")?;
+let changed = transaction.execute("UPDATE person SET age = age + 1")?;
 if changed == expected {
     transaction.commit()?;
 } else {

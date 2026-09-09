@@ -23,6 +23,9 @@ You also need the shared library. See [the shared library](../README.md#the-shar
 
 ## A first program
 
+Create a table, insert rows, read them back, and update one.
+[`examples/person.php`](examples/person.php) is this program and it runs.
+
 ```php
 <?php
 
@@ -31,53 +34,91 @@ use Inillucent\Database;
 $database = Database::open('app.rdb');
 $connection = $database->connect();
 
-$connection->execute('CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, rating REAL)');
-$connection->execute('INSERT INTO authors VALUES (?1, ?2, ?3)', [1, 'Octavia Butler', 4.8]);
-$connection->execute('INSERT INTO authors VALUES (?1, ?2, ?3)', [2, 'Ursula Le Guin', null]);
+$connection->execute('CREATE TABLE person (
+      id         INTEGER PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      last_name  TEXT NOT NULL,
+      email      TEXT,
+      age        INTEGER,
+      height_m   REAL
+    )');
 
-foreach ($connection->query('SELECT id, name, rating FROM authors ORDER BY id') as $author) {
-    echo $author['id'], ' ', $author['name'], PHP_EOL;
+$insert = 'INSERT INTO person (first_name, last_name, email, age, height_m)'
+    . ' VALUES (?1, ?2, ?3, ?4, ?5)';
+$connection->execute($insert, ['Ada', 'Lovelace', 'ada@example.com', 36, 1.65]);
+$connection->execute($insert, ['Grace', 'Hopper', null, 85, 1.57]);
+
+$people = $connection->query(
+    'SELECT id, first_name, last_name, email, age, height_m FROM person ORDER BY id'
+);
+foreach ($people as $person) {
+    echo $person['id'], ' ', $person['first_name'], ' ', $person['last_name'], ' ',
+        $person['email'] ?? 'NULL', ' ', $person['age'], ' ', $person['height_m'], PHP_EOL;
 }
+
+echo 'people: ', $connection->scalar('SELECT COUNT(*) FROM person'), PHP_EOL;
+
+$changed = $connection->execute(
+    'UPDATE person SET email = ?1 WHERE last_name = ?2',
+    ['grace@example.com', 'Hopper']
+);
+echo 'updated: ', $changed->affected, PHP_EOL;
 
 $connection->close();
 $database->close();
 ```
 
+```
+1 Ada Lovelace ada@example.com 36 1.65
+2 Grace Hopper NULL 85 1.57
+people: 2
+updated: 1
+email now: grace@example.com
+```
+
 `close()` on the database closes every connection on it first, because the C library refuses to
-close a database that still has connections open, and freeing it then would leave them pointing at
-memory that is gone.
+close a database that still has connections open.
 
-## Reading results
+## Reading rows
 
-`execute()` returns a `Rows`. It is materialised and copied into PHP, so it outlives the call that
-made it.
+`query()` gives an array per row, keyed by column name. That is what you want most of the time.
 
 ```php
-$rows = $connection->execute('SELECT id, name FROM authors ORDER BY id', [], 200);
+$people = $connection->query('SELECT first_name, last_name, email FROM person ORDER BY id');
 
-$rows->columns;       // ['id', 'name']
-$rows->columnTypes;   // ['INTEGER', 'TEXT'] — '' for an expression
-$rows->rows;          // [[1, 'Octavia Butler'], [2, 'Ursula Le Guin']]
-$rows->total;         // how many the statement produced, exactly
-$rows->more;          // whether the limit of 200 cut anything off
-$rows->affected;      // null for a query; the count for a write
-$rows->tag;           // 'SELECT 2'
-
-$rows->objects();          // [['id' => 1, 'name' => 'Octavia Butler'], ...]
-$rows->one();              // the first row, or null
-$rows->scalar();           // the first column of the first row
-$rows->get(0, 'name');     // one cell, by row and column name
-count($rows);              // how many rows were handed back
+$people[0]['first_name'];   // 'Ada'
+$people[0]['last_name'];    // 'Lovelace'
+$people[1]['email'];        // null - the column is NULL, and null is not ''
 ```
 
-`Rows` is `IteratorAggregate` and `Countable`, so `foreach` and `count()` both work.
-
-`query()` is `execute(...)->objects()` and `scalar()` is the one value:
+`scalar()` gives the first column of the first row, for a COUNT, a MAX, or one field:
 
 ```php
-$connection->query('SELECT id, name FROM authors');
-$connection->scalar('SELECT COUNT(*) FROM authors');
+$connection->scalar('SELECT COUNT(*) FROM person');                                  // 2
+$connection->scalar('SELECT email FROM person WHERE last_name = ?1', ['Lovelace']);
 ```
+
+`execute()` gives the whole result when you need more than the rows:
+
+```php
+$rows = $connection->execute('SELECT id, first_name FROM person ORDER BY id', [], 200);
+
+$rows->columns;       // ['id', 'first_name']
+$rows->columnTypes;   // ['INTEGER', 'TEXT'] - '' for an expression
+$rows->rows;          // [[1, 'Ada'], [2, 'Grace']]
+$rows->total;         // 2 - how many rows the statement produced
+$rows->more;          // false - whether the limit of 200 left any behind
+$rows->affected;      // null for a query; the row count for a write
+
+$rows->objects();            // [['id' => 1, 'first_name' => 'Ada'], ...]
+$rows->one();                // the first row, or null
+$rows->scalar();             // the first column of the first row
+$rows->get(0, 'last_name');  // one cell, by row and column name
+count($rows);                // how many rows were handed back
+```
+
+`total` is counted, not estimated, so a grid can show `1 to 200 of 4,317` and be right. `Rows` is
+`IteratorAggregate` and `Countable`, so `foreach` and `count()` both work.
 
 ## Values, and why blobs are their own type
 
@@ -112,16 +153,16 @@ $row->length();   // how many
 Parameters are `?1`, `?2` and so on, bound in order and never pasted into the text:
 
 ```php
-$connection->execute('SELECT * FROM authors WHERE rating > ?1 AND name LIKE ?2', [4.0, 'O%']);
+$connection->execute('SELECT * FROM person WHERE age > ?1 AND last_name LIKE ?2', [40, 'L%']);
 ```
 
 Compile once and run many times with `prepare`:
 
 ```php
-$insert = $connection->prepare('INSERT INTO authors VALUES (?1, ?2, ?3)');
+$insert = $connection->prepare('INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)');
 try {
-    foreach ($many as $author) {
-        $insert->execute([$author->id, $author->name, $author->rating]);
+    foreach ($many as $person) {
+        $insert->execute([$person->firstName, $person->lastName, $person->email, $person->age, $person->heightM]);
     }
 } finally {
     $insert->close();
@@ -130,11 +171,12 @@ try {
 
 ## Transactions
 
-A transaction is a handle you hold, so what a write did can be checked **before** the commit:
+A transaction is an object you hold open. Run the statements, look at how many rows each one
+changed, then commit or roll back:
 
 ```php
 $transaction = $connection->begin();
-$changed = $transaction->execute('UPDATE authors SET rating = rating + 0.1');
+$changed = $transaction->execute('UPDATE person SET age = age + 1');
 if ($changed === $expected) {
     $transaction->commit();
 } else {

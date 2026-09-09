@@ -3,8 +3,8 @@
 The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process,
 through the Foreign Function and Memory API.
 
-**Java 22 or later.** The Foreign Function and Memory API is final in 22, and using it means there
-is no JNI shim to build and no C compiler in your build.
+**Java 22 or later**, where the Foreign Function and Memory API is final. There is no JNI shim to
+build.
 
 ## Install
 
@@ -25,61 +25,100 @@ about native access.
 
 ## A first program
 
-```java
-import com.inillucent.*;
-import java.util.List;
-import java.util.Map;
+Create a table, insert rows, read them back, and update one.
+[`Person.java`](src/test/java/com/inillucent/Person.java) is this program and it runs.
 
+```java
 try (Database database = Database.open("app.rdb");
      Connection connection = database.connect()) {
 
-    connection.execute("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT, rating REAL)");
-    connection.execute("INSERT INTO authors VALUES (?1, ?2, ?3)",
-        List.of(1, "Octavia Butler", 4.8));
+    connection.execute("""
+        CREATE TABLE person (
+          id         INTEGER PRIMARY KEY,
+          first_name TEXT NOT NULL,
+          last_name  TEXT NOT NULL,
+          email      TEXT,
+          age        INTEGER,
+          height_m   REAL
+        )""");
 
-    for (Map<String, Object> author
-             : connection.query("SELECT id, name, rating FROM authors ORDER BY id")) {
-        System.out.println(author.get("id") + " " + author.get("name"));
+    String insert = "INSERT INTO person (first_name, last_name, email, age, height_m)"
+        + " VALUES (?1, ?2, ?3, ?4, ?5)";
+    connection.execute(insert, List.of("Ada", "Lovelace", "ada@example.com", 36, 1.65));
+    // Arrays.asList rather than List.of, because List.of refuses a null.
+    connection.execute(insert, Arrays.asList("Grace", "Hopper", null, 85, 1.57));
+
+    for (Map<String, Object> person : connection.query(
+            "SELECT id, first_name, last_name, email, age, height_m FROM person ORDER BY id")) {
+        System.out.println(person.get("id") + " " + person.get("first_name") + " "
+            + person.get("last_name") + " " + person.get("email") + " "
+            + person.get("age") + " " + person.get("height_m"));
     }
+
+    System.out.println("people: " + connection.scalar("SELECT COUNT(*) FROM person"));
+
+    Rows changed = connection.execute("UPDATE person SET email = ?1 WHERE last_name = ?2",
+        List.of("grace@example.com", "Hopper"));
+    System.out.println("updated: " + changed.affected());
 }
 ```
 
-`Database` and `Connection` are both `AutoCloseable`. Closing the database closes every connection
-on it first, because the C library refuses to close a database that still has connections open, and
-freeing it then would leave them pointing at memory that is gone.
+```
+1 Ada Lovelace ada@example.com 36 1.65
+2 Grace Hopper null 85 1.57
+people: 2
+updated: 1
+email now: grace@example.com
+```
 
-To bind a `null`, use `Arrays.asList(...)` rather than `List.of(...)`, which refuses null elements.
+`Database` and `Connection` are both `AutoCloseable`. Closing the database closes every connection on
+it first, because the C library refuses to close a database that still has connections open.
 
-## Reading results
+## Reading rows
 
-`execute()` returns `Rows`. It is materialised and copied into Java, so it outlives the call that
-made it.
+`query()` gives a `Map<String, Object>` per row, keyed by column name. That is what you want most of
+the time.
 
 ```java
-Rows rows = connection.execute("SELECT id, name FROM authors ORDER BY id", List.of(), 200L);
+List<Map<String, Object>> people =
+    connection.query("SELECT first_name, last_name, email FROM person ORDER BY id");
 
-rows.columns()        // ["id", "name"]
-rows.columnTypes()    // ["INTEGER", "TEXT"] — "" for an expression
+people.get(0).get("first_name");   // "Ada"
+people.get(0).get("last_name");    // "Lovelace"
+people.get(1).get("email");        // null - the column is NULL, and null is not ""
+
+// Read one out as the type it is.
+String first = (String) people.get(0).get("first_name");
+Long age = (Long) people.get(0).get("age");
+```
+
+`scalar()` gives the first column of the first row, for a COUNT, a MAX, or one field:
+
+```java
+connection.scalar("SELECT COUNT(*) FROM person");                                     // 2L
+connection.scalar("SELECT email FROM person WHERE last_name = ?1", List.of("Lovelace"));
+```
+
+`execute()` gives the whole result when you need more than the rows:
+
+```java
+Rows rows = connection.execute("SELECT id, first_name FROM person ORDER BY id", List.of(), 200L);
+
+rows.columns()        // ["id", "first_name"]
+rows.columnTypes()    // ["INTEGER", "TEXT"] - "" for an expression
 rows.rows()           // List<List<Object>>
-rows.total()          // how many the statement produced, exactly
-rows.more()           // whether the limit of 200 cut anything off
-rows.affected()       // null for a query; the count for a write
-rows.tag()            // "SELECT 2"
+rows.total()          // 2 - how many rows the statement produced
+rows.more()           // false - whether the limit of 200 left any behind
+rows.affected()       // null for a query; the row count for a write
 
 rows.objects();           // List<Map<String, Object>>
 rows.one();               // the first row, or null
 rows.scalar();            // the first column of the first row
-rows.get(0, "name");      // one cell, by row and column name
+rows.get(0, "last_name"); // one cell, by row and column name
 ```
 
-`Rows` is `Iterable`, so `for (List<Object> row : rows)` walks the rows.
-
-`query()` is `execute(...).objects()` and `scalar()` is the one value:
-
-```java
-connection.query("SELECT id, name FROM authors");
-connection.scalar("SELECT COUNT(*) FROM authors");
-```
+`total()` is counted, not estimated, so a grid can show `1 to 200 of 4,317` and be right. `Rows` is
+`Iterable`, so `for (List<Object> row : rows)` walks the rows.
 
 ## Values
 
@@ -100,11 +139,12 @@ means.
 
 ## Transactions
 
-A transaction is a handle you hold, so what a write did can be checked **before** the commit:
+A transaction is an object you hold open. Run the statements, look at how many rows each one
+changed, then commit or roll back:
 
 ```java
 try (Transaction transaction = connection.begin()) {
-    long changed = transaction.execute("UPDATE authors SET rating = rating + 0.1");
+    long changed = transaction.execute("UPDATE person SET age = age + 1");
     if (changed == expected) {
         transaction.commit();
     }

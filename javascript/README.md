@@ -28,52 +28,100 @@ import { connect } from 'inillucent-client';
 
 const db = connect('app.rdb');
 
-db.execute('CREATE TABLE note (id INTEGER PRIMARY KEY, body TEXT)');
-db.execute('INSERT INTO note (body) VALUES (?1)', ['hello']);
+db.execute(`
+  CREATE TABLE person (
+    id         INTEGER PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name  TEXT NOT NULL,
+    email      TEXT,
+    age        INTEGER,
+    height_m   REAL
+  )
+`);
 
-for (const note of db.query('SELECT id, body FROM note')) {
-  console.log(note.id, note.body);
+const insert =
+  'INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)';
+db.execute(insert, ['Ada', 'Lovelace', 'ada@example.com', 36, 1.65]);
+db.execute(insert, ['Grace', 'Hopper', null, 85, 1.57]);
+
+for (const person of db.query(
+  'SELECT id, first_name, last_name, email, age, height_m FROM person ORDER BY id',
+)) {
+  console.log(person.id, person.first_name, person.last_name, person.email, person.age, person.height_m);
 }
+
+console.log('people:', db.scalar('SELECT COUNT(*) FROM person'));
+
+const changed = db.execute('UPDATE person SET email = ?1 WHERE last_name = ?2', [
+  'grace@example.com',
+  'Hopper',
+]);
+console.log('updated:', changed.affected);
 
 db.close();
 ```
 
-[`examples/quickstart.mjs`](examples/quickstart.mjs) is the longer form.
+```
+1 Ada Lovelace ada@example.com 36 1.65
+2 Grace Hopper null 85 1.57
+people: 2
+updated: 1
+```
 
 ## CommonJS
+
+The same program with `require`. [`examples/person.cjs`](examples/person.cjs) is it, and it runs.
 
 ```js
 const { connect } = require('inillucent-client');
 
 const db = connect('app.rdb');
 
-db.execute('CREATE TABLE note (id INTEGER PRIMARY KEY, body TEXT)');
-db.execute('INSERT INTO note (body) VALUES (?1)', ['hello']);
+db.execute(`
+  CREATE TABLE person (
+    id         INTEGER PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name  TEXT NOT NULL,
+    email      TEXT,
+    age        INTEGER,
+    height_m   REAL
+  )
+`);
 
-for (const note of db.query('SELECT id, body FROM note')) {
-  console.log(note.id, note.body);
+db.execute(
+  'INSERT INTO person (first_name, last_name, email, age, height_m) VALUES (?1, ?2, ?3, ?4, ?5)',
+  ['Ada', 'Lovelace', 'ada@example.com', 36, 1.65],
+);
+
+for (const person of db.query('SELECT first_name, last_name, email FROM person')) {
+  console.log(person.first_name, person.last_name, person.email);
 }
 
 db.close();
 ```
 
-[`examples/quickstart.cjs`](examples/quickstart.cjs) is the longer form. The API is identical; only
-the import line differs.
+```
+Ada Lovelace ada@example.com
+```
 
-## The API
+Only the import line differs between the two.
 
-It is the same in both, and [../typescript/README.md](../typescript/README.md) documents all of it:
-values, results, parameters, transactions, refusals and the capability table. The short version:
+## Reading rows
 
-- **`connect(path)`** opens the file and hands back a connection that owns it.
-- **`db.execute(sql, params, limit)`** returns `Rows`, with an exact `total` beside the rows a
-  `limit` handed back.
-- **`db.query(sql, params)`** is the same thing as objects keyed by column name.
-- **`db.scalar(sql, params)`** is the first column of the first row.
-- **`db.transaction()`** is a handle you hold, so a write can be checked before the commit.
-- **`null` is `NULL`**, and it is not the empty string.
-- **`UnsupportedError`** is its own type, and `why.feature` names the construct the engine has not
-  built.
+`query` gives one object per row, keyed by column name:
+
+```js
+const people = db.query('SELECT first_name, last_name, email FROM person ORDER BY id');
+
+people[0].first_name;   // 'Ada'
+people[0].email;        // 'ada@example.com'
+people[1].email;        // null - the column is NULL, and null is not ''
+```
+
+`scalar` gives one value, and `execute` gives the whole result with `total`, `more` and `affected`.
+[../typescript/README.md](../typescript/README.md) documents all of it: values, parameters,
+transactions, errors and the capability table. The API is identical, so everything there applies
+here.
 
 ## Why this folder has its own tests
 

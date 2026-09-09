@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Inillucent.Conformance")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d6eb2e1401fd25f6d9e2b9f417cb854d548fa7b8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3a181384a24e6597bb065e55d47bb2840f59df86")]
 [assembly: System.Reflection.AssemblyProductAttribute("Inillucent.Conformance")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Inillucent.Conformance")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

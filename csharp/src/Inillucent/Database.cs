@@ -374,9 +374,9 @@ public sealed class Statement : IDisposable
 /// <summary>
 /// One transaction, held open while the caller decides whether to commit.
 ///
-/// This is a handle rather than a pair of calls because a check on what a write
-/// did has to happen before the commit. A postcondition tested afterwards is a
-/// report about something that has already happened.
+/// The caller holds it open, runs statements, reads how many rows each one
+/// changed, and only then commits. A check made after the commit cannot stop the
+/// write it was checking.
 ///
 /// Disposing rolls back, so a using block that ends without a commit undoes its
 /// work, which is what an early return means.

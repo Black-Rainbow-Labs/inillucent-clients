@@ -35,9 +35,9 @@ def capped(limit: Optional[int]) -> int:
 class Transaction:
     """One transaction, held open while the caller decides whether to commit.
 
-    This is a handle rather than a pair of calls because a check on what a write
-    did has to happen before the COMMIT. A postcondition tested afterwards is a
-    report about something that has already happened.
+    The caller holds it open, runs statements, reads how many rows each one
+    changed, and only then commits. A check made after the commit cannot stop
+    the write it was checking.
 
     As a context manager it commits on a clean exit and rolls back on an
     exception, which is what a caller means either way.

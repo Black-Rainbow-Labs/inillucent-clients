@@ -1,6 +1,6 @@
 # inillucent, from Python
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process.
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process.
 `ctypes` and the standard library, so there is nothing to compile and nothing to install but this.
 
 ## Install

@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 description = "Client for the Inillucent embedded database, loading its C ABI at runtime."
-repository = "https://github.com/jasonmcaffee/inillucent-clients"
+repository = "https://github.com/Black-Rainbow-Labs/inillucent-clients"
 keywords = ["database", "embedded", "sql", "inillucent"]
 categories = ["database"]
 

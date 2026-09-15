@@ -1,16 +1,16 @@
 # inillucent, from Go
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process.
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process.
 Calls go through [purego](https://github.com/ebitengine/purego), so `CGO_ENABLED` stays 0.
 
 ## Install
 
 ```sh
-go get github.com/jasonmcaffee/inillucent-clients/go
+go get github.com/Black-Rainbow-Labs/inillucent-clients/go
 ```
 
 ```go
-import inillucent "github.com/jasonmcaffee/inillucent-clients/go"
+import inillucent "github.com/Black-Rainbow-Labs/inillucent-clients/go"
 ```
 
 The import path ends in `/go` and the package is named `inillucent`, so the alias above is worth

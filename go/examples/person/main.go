@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	inillucent "github.com/jasonmcaffee/inillucent-clients/go"
+	inillucent "github.com/Black-Rainbow-Labs/inillucent-clients/go"
 )
 
 func main() {

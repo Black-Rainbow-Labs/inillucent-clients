@@ -1,6 +1,6 @@
 # inillucent, from TypeScript
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process.
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process.
 Published as `inillucent-client`, written in TypeScript, with an ES module entry, a CommonJS entry and type declarations,
 so a JavaScript project installs exactly the same package. See [../javascript](../javascript) for
 the plain JavaScript form.

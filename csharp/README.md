@@ -1,6 +1,6 @@
 # inillucent, from C#
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process,
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process,
 through `DllImport`.
 
 Targets **.NET 8** and runs on anything newer. No dependencies.

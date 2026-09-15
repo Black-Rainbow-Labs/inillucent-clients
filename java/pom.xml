@@ -11,7 +11,7 @@
 
   <name>inillucent-client</name>
   <description>Client for the Inillucent embedded database, over its stable C ABI.</description>
-  <url>https://github.com/jasonmcaffee/inillucent-clients</url>
+  <url>https://github.com/Black-Rainbow-Labs/inillucent-clients</url>
 
   <licenses>
     <license>

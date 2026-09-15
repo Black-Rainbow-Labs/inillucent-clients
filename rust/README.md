@@ -1,6 +1,6 @@
 # inillucent, from Rust
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process,
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process,
 loading its C ABI at runtime with [libloading](https://docs.rs/libloading).
 
 ## Which Rust crate to use

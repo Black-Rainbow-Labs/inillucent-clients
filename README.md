@@ -1,6 +1,6 @@
 # inillucent client libraries
 
-Client libraries for [inillucent](https://github.com/jasonmcaffee/inillucent), an embedded database
+Client libraries for [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent), an embedded database
 written in Rust.
 
 There is no server. Your program opens a file, sends SQL to a library in the same process, and gets
@@ -48,7 +48,7 @@ Ada Lovelace ada@example.com
 | **JavaScript** | `npm install inillucent-client` | [javascript/](javascript/) |
 | **Python** | `pip install inillucent-client` | [python/](python/) |
 | **Rust** | `cargo add inillucent-client` | [rust/](rust/) |
-| **Go** | `go get github.com/jasonmcaffee/inillucent-clients/go` | [go/](go/) |
+| **Go** | `go get github.com/Black-Rainbow-Labs/inillucent-clients/go` | [go/](go/) |
 | **Java** | `com.inillucent:inillucent-client` | [java/](java/) |
 | **C#** | `dotnet add package Inillucent.Client` | [csharp/](csharp/) |
 | **PHP** | `composer require inillucent/client` | [php/](php/) |

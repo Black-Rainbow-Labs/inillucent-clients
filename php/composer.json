@@ -3,7 +3,7 @@
   "description": "Client for the Inillucent embedded database, over its stable C ABI.",
   "type": "library",
   "license": "MIT",
-  "homepage": "https://github.com/jasonmcaffee/inillucent-clients",
+  "homepage": "https://github.com/Black-Rainbow-Labs/inillucent-clients",
   "keywords": [
     "database",
     "embedded",

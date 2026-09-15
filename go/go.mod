@@ -1,4 +1,4 @@
-module github.com/jasonmcaffee/inillucent-clients/go
+module github.com/Black-Rainbow-Labs/inillucent-clients/go
 
 go 1.22
 

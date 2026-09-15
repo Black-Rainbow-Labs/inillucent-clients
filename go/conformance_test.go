@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	inillucent "github.com/jasonmcaffee/inillucent-clients/go"
+	inillucent "github.com/Black-Rainbow-Labs/inillucent-clients/go"
 )
 
 // suiteCase is one entry from the shared conformance suite.

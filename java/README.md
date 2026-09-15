@@ -1,6 +1,6 @@
 # inillucent, from Java
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process,
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process,
 through the Foreign Function and Memory API.
 
 **Java 22 or later**, where the Foreign Function and Memory API is final. There is no JNI shim to

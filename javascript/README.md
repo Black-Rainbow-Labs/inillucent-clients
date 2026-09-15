@@ -1,6 +1,6 @@
 # inillucent, from JavaScript
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process,
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process,
 from plain JavaScript.
 
 **This is the same npm package as [../typescript](../typescript), not a second implementation.**

@@ -1,6 +1,6 @@
 # inillucent, from PHP
 
-The [inillucent](https://github.com/jasonmcaffee/inillucent) embedded database, in your process,
+The [inillucent](https://github.com/Black-Rainbow-Labs/Inillucent) embedded database, in your process,
 through the FFI extension.
 
 **PHP 8.1 or later, with `ext-ffi`.** FFI is off in most default builds, so add this to `php.ini`:

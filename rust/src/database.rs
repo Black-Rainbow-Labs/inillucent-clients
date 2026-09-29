@@ -20,7 +20,7 @@ pub const OPEN_DIAGNOSTICS: u32 = 0x0004;
 const NO_LIMIT: u64 = u64::MAX;
 
 /// How a database file is opened.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone)]
 pub struct OpenOptions {
     /// Create the file when it is not there.
     pub create: bool,
@@ -31,17 +31,38 @@ pub struct OpenOptions {
     /// Diagnostics may hold a file system path or a bound value, so do not show
     /// them to a person and do not send them to a shared log.
     pub diagnostics: bool,
+    /// Encrypts the file with this key, or opens an encrypted file.
+    ///
+    /// `x'<64 hex digits>'` is a raw 32 byte key. Any other text is a
+    /// passphrase, which the engine stretches with PBKDF2, so each open takes
+    /// about a quarter of a second. `None` opens a plaintext file. A wrong key,
+    /// a key for a plaintext file and no key for an encrypted file all fail as
+    /// `Status::Corrupt`.
+    pub key: Option<String>,
 }
 
 impl Default for OpenOptions {
     fn default() -> Self {
-        OpenOptions { create: true, read_only: false, diagnostics: false }
+        OpenOptions { create: true, read_only: false, diagnostics: false, key: None }
+    }
+}
+
+/// Prints the options without the key, so a log line or a failed assertion
+/// cannot leak it.
+impl std::fmt::Debug for OpenOptions {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("OpenOptions")
+            .field("create", &self.create)
+            .field("read_only", &self.read_only)
+            .field("diagnostics", &self.diagnostics)
+            .field("key", &self.key.as_ref().map(|_| "<redacted>"))
+            .finish()
     }
 }
 
 impl OpenOptions {
     /// Returns the flags the C ABI takes for these options.
-    fn flags(self) -> u32 {
+    fn flags(&self) -> u32 {
         let mut flags = 0;
         if self.create {
             flags |= OPEN_CREATE;
@@ -70,6 +91,21 @@ fn c_path(path: &Path) -> Result<CString> {
     CString::new(text).map_err(|_| Error {
         status: Status::InvalidState,
         message: "a path may not contain a NUL byte".to_owned(),
+        feature: None,
+        detail: None,
+        offset: None,
+    })
+}
+
+/// Turns an encryption key into the UTF-8 C string the ABI takes.
+///
+/// The error text never includes the key.
+///
+/// @param key - the raw key text or the passphrase
+fn c_key(key: &str) -> Result<CString> {
+    CString::new(key).map_err(|_| Error {
+        status: Status::InvalidState,
+        message: "the encryption key contains a NUL byte, and the ABI takes a C string".to_string(),
         feature: None,
         detail: None,
         offset: None,
@@ -381,10 +417,12 @@ impl Connection<'_> {
 
     /// Asks a running statement to stop.
     ///
-    /// This always refuses as `Unsupported` today, and `supports("cancel")` says
-    /// so before an application draws a Stop button: the engine runs a statement
-    /// whole rather than a row at a time, so there is no point at which it could
-    /// notice.
+    /// `supports("cancel")` answers `Support::Partial`. The engine checks for a
+    /// cancel at every leaf of a scan and every batch a result collects, so a
+    /// long scan, a large result or a slow join stops with `Status::Interrupted`
+    /// and the connection stays usable. A single operator partway through one
+    /// indivisible piece of work, such as a sort of rows it has already read,
+    /// finishes first, so a Stop button should not promise an instant stop.
     pub fn cancel(&self) -> Result<()> {
         let calls = driver()?;
         let mut error: *mut c_void = std::ptr::null_mut();
@@ -429,15 +467,23 @@ impl Database {
 
     /// Opens a database file with explicit options.
     ///
+    /// When `options.key` is set the file is opened with
+    /// `inillucent_open_with_key`, otherwise with `inillucent_open`. The key is
+    /// never printed or logged.
+    ///
     /// @param path - the database file
-    /// @param options - how to open it
+    /// @param options - how to open it, including the optional key
     pub fn open_with(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
         let calls = driver()?;
         let text = c_path(path.as_ref())?;
+        let key = options.key.as_deref().map(c_key).transpose()?;
         let mut handle: *mut c_void = std::ptr::null_mut();
         let mut error: *mut c_void = std::ptr::null_mut();
         unsafe {
-            let status = (calls.open)(text.as_ptr(), options.flags(), &mut handle, &mut error);
+            let status = match &key {
+                Some(key) => (calls.open_with_key)(text.as_ptr(), options.flags(), key.as_ptr(), &mut handle, &mut error),
+                None => (calls.open)(text.as_ptr(), options.flags(), &mut handle, &mut error),
+            };
             check(calls, status, error)?;
         }
         Ok(Database { handle, _not_send: PhantomData })

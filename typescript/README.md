@@ -211,7 +211,7 @@ Ask first rather than after:
 ```ts
 import { capabilities, supports, Support } from 'inillucent-client';
 
-if (supports('cancel') !== Support.Yes) {
+if (supports('cancel') === Support.No) {
   // do not draw a Stop button
 }
 
@@ -219,6 +219,24 @@ for (const capability of capabilities()) {
   console.log(capability.name, capability.supportName, capability.note);
 }
 ```
+
+## Encrypted databases
+
+Pass a `key` to open a database that is encrypted on disk. A key written as `x'` followed by 64 hex
+digits and a closing quote is a raw 32 byte key. Any other text is a passphrase, which costs about
+0.25 seconds on every open.
+
+```ts
+import { connect } from 'inillucent-client';
+
+const db = connect('vault.rdb', { key: process.env.VAULT_KEY });
+db.execute('CREATE TABLE IF NOT EXISTS notes (body TEXT)');
+db.close();
+```
+
+A wrong key, a key given for a plaintext file, and no key for an encrypted file all throw an
+`InillucentError` with status `Status.Corrupt`. `PRAGMA encryption` answers `xchacha20-poly1305` on
+an encrypted database and `none` otherwise. Keep the key out of source control and out of logs.
 
 ## The database itself
 

@@ -155,10 +155,12 @@ final class Connection
     /**
      * Asks a running statement to stop.
      *
-     * This always throws UnsupportedFeatureException today, and
-     * Driver::supports('cancel') says so before an application draws a Stop
-     * button: the engine runs a statement whole rather than a row at a time, so
-     * there is no point at which it could notice.
+     * Driver::supports('cancel') is Support::Partial. A running statement stops
+     * with Status::Interrupted at the next point the executor checks, which is
+     * every leaf of a scan and every batch a result collects, and the connection
+     * stays usable. A single operator part-way through one indivisible piece of
+     * work, such as a sort of the rows it has already read, finishes first. Draw
+     * a Stop button, but do not promise it is instant.
      */
     public function cancel(): void
     {

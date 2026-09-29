@@ -137,6 +137,7 @@ type driverCalls struct {
 	supports        func(name string) int32
 
 	open           func(path string, flags uint32, out *uintptr, err *uintptr) int32
+	openWithKey    func(path string, flags uint32, key string, out *uintptr, err *uintptr) int32
 	closeDatabase  func(db uintptr, err *uintptr) int32
 	checkpoint     func(db uintptr, err *uintptr) int32
 	integrityCheck func(db uintptr, err *uintptr) int32

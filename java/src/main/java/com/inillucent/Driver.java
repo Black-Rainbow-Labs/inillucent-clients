@@ -186,6 +186,7 @@ final class Driver {
         bind(lookup, "inillucent_supports", FunctionDescriptor.of(i32, ptr));
 
         bind(lookup, "inillucent_open", FunctionDescriptor.of(i32, ptr, i32, ptr, ptr));
+        bind(lookup, "inillucent_open_with_key", FunctionDescriptor.of(i32, ptr, i32, ptr, ptr, ptr));
         bind(lookup, "inillucent_close", FunctionDescriptor.of(i32, ptr, ptr));
         bind(lookup, "inillucent_checkpoint", FunctionDescriptor.of(i32, ptr, ptr));
         bind(lookup, "inillucent_integrity_check", FunctionDescriptor.of(i32, ptr, ptr));

@@ -177,7 +177,7 @@ statement, and the one worth catching is caught by type.
 Ask first rather than after:
 
 ```java
-if (Inillucent.supports("cancel") != Support.YES) {
+if (Inillucent.supports("cancel") == Support.NO) {
     // do not draw a Stop button
 }
 
@@ -185,6 +185,23 @@ for (Capability capability : Inillucent.capabilities()) {
     System.out.println(capability.name() + " " + capability.support() + " " + capability.note());
 }
 ```
+
+## Encrypted databases
+
+Pass a key in `Database.Options` to create or open an encrypted database. A key written as `x'`
+followed by 64 hex digits and a closing quote is a raw 32 byte key. Any other text is a passphrase,
+and opening with a passphrase takes about a quarter of a second.
+
+```java
+String key = "x'" + "5a".repeat(32) + "'";
+try (Database database = Database.open("vault.rdb", Database.Options.defaults().key(key))) {
+    // use it as any other database
+}
+```
+
+A wrong key, a key for a plaintext file and no key for an encrypted file all fail with
+`Status.CORRUPT`. `PRAGMA encryption` answers `xchacha20-poly1305` on an encrypted database and
+`none` on any other. The key is never written to a log or to an error message.
 
 ## Threads
 

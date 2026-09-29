@@ -182,9 +182,31 @@ were wrong. You can also ask before you write the statement:
 ```ts
 import { capabilities, supports, Support } from 'inillucent-client';
 
-supports('cancel');     // Support.No, so do not draw a Stop button
+supports('cancel');     // Support.Partial: a running statement stops at the next check
 capabilities();         // every feature the engine declares, with a note on each
 ```
+
+---
+
+## Encrypted databases
+
+Pass a key when you open a database, and every file the engine writes for it is encrypted: the
+database file, its log and its journals. A database created with a key is encrypted, and every
+later open needs the same key.
+
+```ts
+const db = connect('vault.rdb', { key: process.env.VAULT_KEY });
+
+db.scalar('PRAGMA encryption');   // 'xchacha20-poly1305'
+```
+
+The key is text. `x'` followed by 64 hex digits and `'` is a raw 32 byte key. Anything else is a
+passphrase, which costs about a quarter of a second each time the database is opened. A wrong key,
+no key for an encrypted database, and a key for a plaintext one all fail with the status `corrupt`.
+Keep the key out of source code: read it from the environment or from a secret store.
+
+Every language takes the key the same way, as a `key` option to the call that opens the database.
+The engine's `docs/encryption.md` describes what is encrypted and what it costs.
 
 ---
 
@@ -194,6 +216,7 @@ Every client calls one shared library built from the engine:
 `inillucent_driver_capi.dll` on Windows, `libinillucent_driver_capi.so` on Linux,
 `libinillucent_driver_capi.dylib` on macOS.
 
+The clients need ABI 1.1.0 or later, which is the first version with `inillucent_open_with_key`.
 Build it from an engine checkout and copy it into `native/`:
 
 ```sh

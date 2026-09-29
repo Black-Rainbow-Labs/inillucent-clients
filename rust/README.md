@@ -206,7 +206,7 @@ Ask first rather than after:
 ```rust
 use inillucent::{capabilities, supports, Support};
 
-if supports("cancel")? != Support::Yes {
+if supports("cancel")? == Support::No {
     // do not draw a Stop button
 }
 
@@ -218,6 +218,24 @@ for capability in capabilities()? {
 
 An unknown name answers `Support::Unknown`, and you should treat that as no rather than as yes: a
 capability that was never declared was certainly never checked.
+
+## Encrypted databases
+
+Set `key` in `OpenOptions` to create or open an encrypted database. A key written as `x'` followed by
+64 hex digits and a closing quote is a raw 32 byte key. Any other text is a passphrase, and opening
+with a passphrase takes about a quarter of a second.
+
+```rust
+use inillucent::{Database, OpenOptions};
+
+let options = OpenOptions { key: Some("x'5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a'".into()), ..OpenOptions::default() };
+let db = Database::open_with("vault.rdb", options)?;
+# Ok::<(), inillucent::Error>(())
+```
+
+A wrong key, a key for a plaintext file and no key for an encrypted file all fail with
+`Status::Corrupt`. `PRAGMA encryption` answers `xchacha20-poly1305` on an encrypted database and
+`none` on any other. The key is never written to a log or to an error message.
 
 ## Threads
 

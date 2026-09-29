@@ -19,6 +19,17 @@ public sealed class OpenOptions
     /// </summary>
     public bool Diagnostics { get; init; }
 
+    /// <summary>
+    /// Encrypts the database with this key, or opens an encrypted one.
+    ///
+    /// "x'" followed by 64 hex digits and a closing quote is a raw 32 byte key,
+    /// and any other text is a passphrase, which the engine stretches with PBKDF2
+    /// so each open takes about a quarter of a second. Null means no key. A wrong
+    /// key, a key for a plaintext file and no key for an encrypted file all fail
+    /// with Status.Corrupt. The key is never logged or included in an error.
+    /// </summary>
+    public string? Key { get; init; }
+
     /// <summary>Returns the flags the C ABI takes for these options.</summary>
     internal uint Flags()
     {
@@ -56,15 +67,23 @@ public sealed class Database : IDisposable
 
     /// <summary>
     /// Opens a database file, creating it when it is not there.
+    ///
+    /// When the options carry a key the file is opened with
+    /// inillucent_open_with_key, and otherwise with inillucent_open.
     /// </summary>
     /// <param name="path">the database file</param>
-    /// <param name="options">how to open it, or null for the ordinary options</param>
+    /// <param name="options">how to open it, including the optional encryption key, or null for the ordinary options</param>
     public static Database Open(string path, OpenOptions? options = null)
     {
         NativeMethods.EnsureResolver();
         Driver.CheckAbi();
-        var status = NativeMethods.inillucent_open(
-            path, (options ?? new OpenOptions()).Flags(), out var handle, out var error);
+        options ??= new OpenOptions();
+        IntPtr handle;
+        IntPtr error;
+        var status = options.Key is null
+            ? NativeMethods.inillucent_open(path, options.Flags(), out handle, out error)
+            : NativeMethods.inillucent_open_with_key(
+                path, options.Flags(), options.Key, out handle, out error);
         InillucentException.Check(status, error);
         return new Database(handle);
     }
@@ -242,10 +261,12 @@ public sealed class Connection : IDisposable
     /// <summary>
     /// Asks a running statement to stop.
     ///
-    /// This always throws UnsupportedFeatureException today, and
-    /// Driver.Supports("cancel") says so before an application draws a Stop
-    /// button: the engine runs a statement whole rather than a row at a time, so
-    /// there is no point at which it could notice.
+    /// Driver.Supports("cancel") answers Support.Partial. The engine checks for a
+    /// cancel at every leaf of a scan and every batch a result collects, so a long
+    /// scan, a large result or a slow join stops with Status.Interrupted and the
+    /// connection stays usable. A single operator partway through one indivisible
+    /// piece of work, such as a sort of rows it has already read, finishes first,
+    /// so a Stop button should not promise an instant stop.
     /// </summary>
     public void Cancel()
     {

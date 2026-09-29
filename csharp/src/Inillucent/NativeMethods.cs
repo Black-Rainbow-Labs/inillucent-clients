@@ -76,6 +76,13 @@ internal static class NativeMethods
         uint flags, out IntPtr database, out IntPtr error);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int inillucent_open_with_key(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        uint flags,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string key,
+        out IntPtr database, out IntPtr error);
+
+    [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int inillucent_close(IntPtr database, out IntPtr error);
 
     [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]

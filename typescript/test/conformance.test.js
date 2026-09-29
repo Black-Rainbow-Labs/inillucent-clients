@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -196,12 +196,64 @@ test('the capability table can be read', () => {
   );
   assert.equal(
     supports('cancel'),
-    Support.No,
-    'cancel is declared unsupported, and a client that reported otherwise would have an application drawing a Stop button that cannot work',
+    Support.Partial,
+    'cancel is partial: a running statement stops at the next point the executor checks, not instantly',
   );
   assert.equal(
     supports('time_travel'),
     Support.Unknown,
     'a capability nobody declared must answer Unknown rather than No: they mean different things, and one of them is a checked absence',
   );
+});
+
+/**
+ * Opens the database at a path with an optional key, reads one value and closes it.
+ * @param path - the database file
+ * @param options - open options, usually holding the key
+ * @param sql - a statement to run and return the rows of
+ */
+function readWith(path, options, sql) {
+  const database = new Database(path, options);
+  try {
+    const connection = database.connect();
+    try {
+      return connection.query(sql);
+    } finally {
+      connection.close();
+    }
+  } finally {
+    database.close();
+  }
+}
+
+test('an encrypted database keeps its text out of the file and needs its key to open', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'inillucent-encrypted-ts-'));
+  const path = join(folder, 'vault.rdb');
+  const key = "x'" + '5a'.repeat(32) + "'";
+  const secret = 'the vault code is 7461';
+  try {
+    const database = new Database(path, { key });
+    const connection = database.connect();
+    connection.execute('CREATE TABLE vault (id INTEGER PRIMARY KEY, note TEXT)');
+    connection.execute('INSERT INTO vault (note) VALUES (?1)', [secret]);
+    connection.close();
+    database.close();
+
+    for (const name of readdirSync(folder)) {
+      assert.ok(!readFileSync(join(folder, name)).includes(secret), `${name} holds the plaintext`);
+    }
+    assert.deepEqual(readWith(path, { key }, 'SELECT note FROM vault').map((row) => row.note), [secret]);
+    const pragma = readWith(path, { key }, 'PRAGMA encryption');
+    assert.equal(Object.values(pragma[0])[0], 'xchacha20-poly1305');
+
+    const wrongKey = "x'" + '3c'.repeat(32) + "'";
+    for (const options of [{}, { key: wrongKey }]) {
+      assert.throws(
+        () => new Database(path, options),
+        (why) => why instanceof InillucentError && why.status === Status.Corrupt,
+      );
+    }
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });

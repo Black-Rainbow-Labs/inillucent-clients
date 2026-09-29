@@ -37,6 +37,7 @@ final class Driver
         int inillucent_supports(const char *name);
 
         int inillucent_open(const char *path, unsigned int flags, inillucent_db **out, inillucent_error **error);
+        int inillucent_open_with_key(const char *path, unsigned int flags, const char *key, inillucent_db **out, inillucent_error **error);
         int inillucent_close(inillucent_db *db, inillucent_error **error);
         int inillucent_checkpoint(inillucent_db *db, inillucent_error **error);
         int inillucent_integrity_check(inillucent_db *db, inillucent_error **error);

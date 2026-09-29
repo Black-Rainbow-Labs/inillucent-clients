@@ -123,6 +123,26 @@ people[1].email;        // null - the column is NULL, and null is not ''
 transactions, errors and the capability table. The API is identical, so everything there applies
 here.
 
+## Encrypted databases
+
+Pass a `key` to open a database that is encrypted on disk. A key written as `x'` followed by 64 hex
+digits and a closing quote is a raw 32 byte key. Any other text is a passphrase, which costs about
+0.25 seconds on every open.
+
+```js
+import { connect } from 'inillucent-client';
+
+const db = connect('vault.rdb', { key: process.env.VAULT_KEY });
+db.execute('CREATE TABLE IF NOT EXISTS notes (body TEXT)');
+db.close();
+```
+
+A wrong key, a key given for a plaintext file, and no key for an encrypted file all throw an
+`InillucentError` with status `Status.Corrupt`. `PRAGMA encryption` answers `xchacha20-poly1305` on
+an encrypted database and `none` otherwise. Keep the key out of source control and out of logs.
+
+The same option works from `require('inillucent-client')`.
+
 ## Why this folder has its own tests
 
 The CommonJS entry is a **separate build artifact**. `import.meta.url` has no meaning in CommonJS,

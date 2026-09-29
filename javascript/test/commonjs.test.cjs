@@ -127,6 +127,6 @@ for (const theCase of suite.cases) {
 
 test('the capability table reads through require() as well', () => {
   assert.ok(capabilities().length > 0);
-  assert.equal(supports('cancel'), Support.No);
+  assert.equal(supports('cancel'), Support.Partial, 'cancel is partial: a running statement stops at the next point the executor checks');
   assert.equal(supports('time_travel'), Support.Unknown);
 });

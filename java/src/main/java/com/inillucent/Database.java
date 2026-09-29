@@ -51,16 +51,27 @@ public final class Database implements AutoCloseable {
     /**
      * Opens a database file with explicit options.
      *
+     * When the options carry a key the file is opened with
+     * inillucent_open_with_key, and otherwise with inillucent_open. The key is
+     * never printed or logged.
+     *
      * @param path - the database file
-     * @param options - how to open it
+     * @param options - how to open it, including the optional encryption key
      */
     public static Database open(String path, Options options) {
         Driver driver = Driver.get();
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment out = arena.allocate(ValueLayout.ADDRESS);
             MemorySegment error = arena.allocate(ValueLayout.ADDRESS);
-            int status = driver.callInt("inillucent_open",
-                arena.allocateFrom(path), options.flags(), out, error);
+            int status;
+            if (options.key() != null) {
+                status = driver.callInt("inillucent_open_with_key",
+                    arena.allocateFrom(path), options.flags(), arena.allocateFrom(options.key()),
+                    out, error);
+            } else {
+                status = driver.callInt("inillucent_open",
+                    arena.allocateFrom(path), options.flags(), out, error);
+            }
             Check.status(driver, status, error);
             return new Database(driver, out.get(ValueLayout.ADDRESS, 0));
         }
@@ -152,6 +163,7 @@ public final class Database implements AutoCloseable {
         private boolean create = true;
         private boolean readOnly = false;
         private boolean diagnostics = false;
+        private String key = null;
 
         /** Returns the ordinary options: create the file, allow writes, no diagnostics. */
         public static Options defaults() {
@@ -189,6 +201,28 @@ public final class Database implements AutoCloseable {
         public Options diagnostics(boolean yes) {
             this.diagnostics = yes;
             return this;
+        }
+
+        /**
+         * Sets the key that encrypts the database, or opens an encrypted one.
+         *
+         * "x'" followed by 64 hex digits and a closing quote is a raw 32 byte
+         * key, and any other text is a passphrase, which the engine stretches
+         * with PBKDF2 so each open takes about a quarter of a second. A wrong
+         * key, a key for a plaintext file and no key for an encrypted file all
+         * fail with Status.CORRUPT. The key is never logged or included in an
+         * error.
+         *
+         * @param key - the raw key text or the passphrase, or null for no key
+         */
+        public Options key(String key) {
+            this.key = key;
+            return this;
+        }
+
+        /** Returns the encryption key, or null when the database is not encrypted. */
+        String key() {
+            return key;
         }
 
         /** Returns the flags the C ABI takes for these options. */

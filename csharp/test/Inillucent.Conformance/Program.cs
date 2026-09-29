@@ -45,10 +45,94 @@ public static class Program
         }
 
         failures.AddRange(CheckCapabilityTable());
+        failures.AddRange(CheckEncryptedDatabase());
 
         Console.WriteLine();
         Console.WriteLine($"{cases.GetArrayLength()} cases, {failures.Count} failures");
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Checks that an encrypted database keeps its text off disk, reads back with
+    /// its key, reports its cipher, and refuses no key and a different key as
+    /// corrupt.
+    /// </summary>
+    private static List<string> CheckEncryptedDatabase()
+    {
+        var wrong = new List<string>();
+        var directory = Directory.CreateTempSubdirectory("inillucent-cs-encrypted-").FullName;
+        var path = Path.Combine(directory, "encrypted.rdb");
+        var key = "x'" + string.Concat(Enumerable.Repeat("5a", 32)) + "'";
+        var otherKey = "x'" + string.Concat(Enumerable.Repeat("6b", 32)) + "'";
+        const string secret = "the vault code is 7461";
+        try
+        {
+            using (var database = Database.Open(path, new OpenOptions { Key = key }))
+            using (var connection = database.Connect())
+            {
+                connection.Execute("CREATE TABLE vault (note TEXT)");
+                connection.Execute("INSERT INTO vault (note) VALUES (?1)", new object?[] { secret });
+            }
+            foreach (var file in Directory.GetFiles(directory))
+            {
+                var text = System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(file));
+                if (text.Contains(secret))
+                {
+                    wrong.Add($"encrypted: the plaintext appears in {Path.GetFileName(file)}");
+                }
+            }
+            using (var database = Database.Open(path, new OpenOptions { Key = key }))
+            using (var connection = database.Connect())
+            {
+                var note = connection.Scalar("SELECT note FROM vault");
+                if (!secret.Equals(note))
+                {
+                    wrong.Add($"encrypted: the row read back as {note}");
+                }
+                var mode = connection.Scalar("PRAGMA encryption");
+                if (!"xchacha20-poly1305".Equals(mode))
+                {
+                    wrong.Add($"encrypted: PRAGMA encryption answered {mode}");
+                }
+            }
+            wrong.AddRange(ExpectCorrupt(path, null, "opening without a key"));
+            wrong.AddRange(ExpectCorrupt(path, otherKey, "opening with a different key"));
+        }
+        finally
+        {
+            foreach (var file in Directory.GetFiles(directory))
+            {
+                File.Delete(file);
+            }
+            Directory.Delete(directory);
+        }
+        Console.WriteLine($"  {(wrong.Count == 0 ? "ok  " : "FAIL")}  encrypted database");
+        foreach (var problem in wrong)
+        {
+            Console.WriteLine($"          {problem}");
+        }
+        return wrong;
+    }
+
+    /// <summary>
+    /// Returns a problem line unless opening the database failed with Status.Corrupt.
+    /// </summary>
+    /// <param name="path">the database file</param>
+    /// <param name="key">the key to try, or null for none</param>
+    /// <param name="what">says which attempt this was</param>
+    private static List<string> ExpectCorrupt(string path, string? key, string what)
+    {
+        try
+        {
+            using var database = Database.Open(path, new OpenOptions { Key = key });
+            return [$"encrypted: {what} must fail, and it opened"];
+        }
+        catch (InillucentException failure)
+        {
+            return failure.Status == Status.Corrupt
+                ? []
+                : [$"encrypted: {what} failed as {failure.Status} and must fail as corrupt"];
+        }
     }
 
     /// <summary>Returns the path of the shared conformance suite.</summary>
@@ -351,10 +435,15 @@ public static class Program
                 Console.WriteLine($"  not supported: {row.Name}");
             }
         }
-        if (Driver.Supports("cancel") != Support.No)
+        if (Driver.Supports("cancel") != Support.Partial)
         {
-            wrong.Add("cancel is declared unsupported, and a client that reported otherwise would"
-                + " have an application drawing a Stop button that cannot work");
+            wrong.Add("cancel is partial: a running statement stops at the next point the executor"
+                + $" checks, and the engine answered {Driver.Supports("cancel")}");
+        }
+        if (Driver.Supports("encryption") != Support.Yes)
+        {
+            wrong.Add("the engine declares encryption at rest as supported, and it answered"
+                + $" {Driver.Supports("encryption")}");
         }
         if (Driver.Supports("time_travel") != Support.Unknown)
         {

@@ -190,7 +190,7 @@ instead of "check your spelling".
 Ask first rather than after:
 
 ```csharp
-if (Driver.Supports("cancel") != Support.Yes)
+if (Driver.Supports("cancel") == Support.No)
 {
     // do not draw a Stop button
 }
@@ -200,6 +200,21 @@ foreach (var capability in Driver.Capabilities())
     Console.WriteLine($"{capability.Name} {capability.SupportName} {capability.Note}");
 }
 ```
+
+## Encrypted databases
+
+Set `Key` in `OpenOptions` to create or open an encrypted database. A key written as `x'` followed by
+64 hex digits and a closing quote is a raw 32 byte key. Any other text is a passphrase, and opening
+with a passphrase takes about a quarter of a second.
+
+```csharp
+var key = "x'" + new string('5', 64) + "'";
+using var database = Database.Open("vault.rdb", new OpenOptions { Key = key });
+```
+
+A wrong key, a key for a plaintext file and no key for an encrypted file all fail with
+`Status.Corrupt`. `PRAGMA encryption` answers `xchacha20-poly1305` on an encrypted database and
+`none` on any other. The key is never written to a log or to an error message.
 
 ## Threads
 

@@ -34,12 +34,18 @@ final class Database
      * @param bool $readOnly refuse anything but a query
      * @param bool $diagnostics collect internal diagnostic text on failures, which
      *        may hold a path or a bound value and so must not be shown to a person
+     * @param ?string $key opens an encrypted database. "x'<64 hex digits>'" is a raw
+     *        32 byte key and anything else is a passphrase, which is stretched with
+     *        PBKDF2 and costs about 0.25 seconds per open. A wrong key, a key for a
+     *        plaintext file and no key for an encrypted file all throw with
+     *        Status::Corrupt. Leave it null for a plaintext database.
      */
     public static function open(
         string $path,
         bool $create = true,
         bool $readOnly = false,
         bool $diagnostics = false,
+        ?string $key = null,
     ): self {
         $ffi = Driver::ffi();
         $flags = 0;
@@ -54,8 +60,27 @@ final class Database
         }
         $out = $ffi->new('inillucent_db*[1]');
         $error = $ffi->new('inillucent_error*[1]');
-        InillucentException::check($ffi->inillucent_open($path, $flags, $out, $error), $error);
+        InillucentException::check(self::callOpen($ffi, $path, $flags, $key, $out, $error), $error);
         return new self($out[0]);
+    }
+
+    /**
+     * Calls inillucent_open_with_key when a key was given and inillucent_open
+     * otherwise. The key goes straight to the driver and is never logged.
+     *
+     * @param \FFI $ffi the loaded driver
+     * @param string $path the database file
+     * @param int $flags the OPEN_ flags
+     * @param ?string $key the encryption key text, or null for a plaintext database
+     * @param mixed $out receives the database handle
+     * @param mixed $error receives the driver's error handle on failure
+     */
+    private static function callOpen(\FFI $ffi, string $path, int $flags, ?string $key, mixed $out, mixed $error): int
+    {
+        if ($key !== null) {
+            return $ffi->inillucent_open_with_key($path, $flags, $key, $out, $error);
+        }
+        return $ffi->inillucent_open($path, $flags, $out, $error);
     }
 
     /** Opens a connection, and with it a session. */

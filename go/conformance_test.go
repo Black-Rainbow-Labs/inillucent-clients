@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	inillucent "github.com/Black-Rainbow-Labs/inillucent-clients/go"
@@ -355,9 +356,17 @@ func TestCapabilityTableCanBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cancel != inillucent.SupportNo {
-		t.Errorf("cancel is declared unsupported and answered %s, and a client that reported "+
-			"otherwise would have an application drawing a Stop button that cannot work", cancel)
+	if cancel != inillucent.SupportPartial {
+		t.Errorf("cancel is partial: a running statement stops at the next point the executor "+
+			"checks, and the engine answered %s", cancel)
+	}
+
+	encryption, err := inillucent.Supports("encryption")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encryption != inillucent.SupportYes {
+		t.Errorf("the engine declares encryption at rest as supported and answered %s", encryption)
 	}
 
 	invented, err := inillucent.Supports("time_travel")
@@ -368,4 +377,98 @@ func TestCapabilityTableCanBeRead(t *testing.T) {
 		t.Errorf("a capability nobody declared answered %s and must answer unknown: they mean "+
 			"different things, and one of them is a checked absence", invented)
 	}
+}
+
+// filesHold reports whether the database file or any write ahead log file beside
+// it contains the text.
+//
+// @param path - the database file
+// @param needle - the text to look for
+func filesHold(t *testing.T, path string, needle string) bool {
+	t.Helper()
+	found := false
+	names, err := filepath.Glob(path + "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		bytes, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(bytes), needle) {
+			found = true
+		}
+	}
+	return found
+}
+
+// requireCorrupt fails the test unless opening the database failed as StatusCorrupt.
+//
+// @param path - the database file
+// @param options - the options to try
+// @param what - says which attempt this was
+func requireCorrupt(t *testing.T, path string, options inillucent.Options, what string) {
+	t.Helper()
+	database, err := inillucent.OpenWith(path, options)
+	if err == nil {
+		database.Close()
+		t.Fatalf("%s must fail, and it opened", what)
+	}
+	var failure *inillucent.Error
+	if !errors.As(err, &failure) || failure.Status != inillucent.StatusCorrupt {
+		t.Fatalf("%s must fail as corrupt (8), and it said: %v", what, err)
+	}
+}
+
+func TestEncryptedDatabaseKeepsTextOffDiskAndNeedsItsKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "encrypted.rdb")
+	key := "x'" + strings.Repeat("5a", 32) + "'"
+	otherKey := "x'" + strings.Repeat("6b", 32) + "'"
+	secret := "the vault code is 7461"
+
+	database, err := inillucent.OpenWith(path, inillucent.Options{Key: key})
+	if err != nil {
+		t.Fatalf("a new database must open with a key: %v", err)
+	}
+	connection, err := database.Connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec("CREATE TABLE vault (note TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Exec("INSERT INTO vault (note) VALUES (?1)", secret); err != nil {
+		t.Fatal(err)
+	}
+	connection.Close()
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if filesHold(t, path, secret) {
+		t.Fatal("the plaintext appears in the encrypted file or its write ahead log")
+	}
+
+	database, err = inillucent.OpenWith(path, inillucent.Options{Key: key})
+	if err != nil {
+		t.Fatalf("the same key must open the file again: %v", err)
+	}
+	defer database.Close()
+	connection, err = database.Connect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	got, err := connection.Scalar("SELECT note FROM vault")
+	if err != nil || got != secret {
+		t.Fatalf("the row must read back as %q, got %v (%v)", secret, got, err)
+	}
+	mode, err := connection.Scalar("PRAGMA encryption")
+	if err != nil || mode != "xchacha20-poly1305" {
+		t.Fatalf("PRAGMA encryption must answer xchacha20-poly1305, got %v (%v)", mode, err)
+	}
+
+	requireCorrupt(t, path, inillucent.Options{}, "opening an encrypted file without a key")
+	requireCorrupt(t, path, inillucent.Options{Key: otherKey}, "opening with a different key")
 }

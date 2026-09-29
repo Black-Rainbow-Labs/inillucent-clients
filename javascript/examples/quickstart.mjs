@@ -31,7 +31,7 @@ if (txn.execute("INSERT INTO authors VALUES (3, 'Ted Chiang', 4.9)") === 1) txn.
 else txn.rollback();
 
 console.log('authors:', db.scalar('SELECT COUNT(*) FROM authors'));
-console.log('cancel supported:', supports('cancel') === Support.Yes);
+console.log('cancel is partial:', supports('cancel') === Support.Partial);
 
 try {
   db.cancel();

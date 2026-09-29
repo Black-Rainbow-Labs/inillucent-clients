@@ -282,11 +282,13 @@ class Connection:
     def cancel(self) -> None:
         """Ask a running statement to stop.
 
-        This always raises Unsupported today, and supports("cancel") says so
-        before an application draws a Stop button: the engine runs a statement
-        whole rather than a row at a time, so there is no point at which it
-        could notice. It is here so a binding can wire it once and have it start
-        working the day the capability changes.
+        supports("cancel") is SUPPORT_PARTIAL. A running statement stops with
+        an Interrupted error at the next point the executor checks, which is
+        every leaf of a scan and every batch a result collects, and the
+        connection stays usable. A single operator part-way through one
+        indivisible piece of work, such as a sort of the rows it has already
+        read, finishes first. Draw a Stop button, but do not promise it is
+        instant.
         """
         error = c_void_p()
         check(lib().inillucent_cancel(self._handle, ctypes.byref(error)), error)
@@ -315,6 +317,27 @@ class Connection:
         self.close()
 
 
+def _open_native(path: str, flags: int, key: Optional[str], handle, error) -> int:
+    """Call inillucent_open_with_key when a key was given, inillucent_open otherwise.
+
+    The key goes straight to the driver and is never logged or printed.
+
+    @param path - the database file
+    @param flags - the OPEN_ flags
+    @param key - the encryption key text, or None for a plaintext database
+    @param handle - c_void_p that receives the database handle
+    @param error - c_void_p that receives the driver's error handle on failure
+    """
+    if key is not None:
+        return lib().inillucent_open_with_key(
+            path.encode("utf-8"), flags, key.encode("utf-8"),
+            ctypes.byref(handle), ctypes.byref(error),
+        )
+    return lib().inillucent_open(
+        path.encode("utf-8"), flags, ctypes.byref(handle), ctypes.byref(error)
+    )
+
+
 class Database:
     """One open database file.
 
@@ -324,7 +347,19 @@ class Database:
     """
 
     def __init__(self, path: str, create: bool = True, read_only: bool = False,
-                 diagnostics: bool = False) -> None:
+                 diagnostics: bool = False, key: Optional[str] = None) -> None:
+        """Open a database file, creating it unless create is False.
+
+        @param path - the database file
+        @param create - create the file when it is not there
+        @param read_only - refuse anything but a query
+        @param diagnostics - collect internal diagnostic text on failures
+        @param key - opens an encrypted database. "x'<64 hex digits>'" is a raw
+            32 byte key and anything else is a passphrase, which is stretched
+            with PBKDF2 and costs about 0.25 seconds per open. A wrong key, a
+            key for a plaintext file and no key for an encrypted file all raise
+            an error with status CORRUPT. Leave it out for a plaintext database.
+        """
         flags = 0
         if create:
             flags |= OPEN_CREATE
@@ -334,9 +369,7 @@ class Database:
             flags |= OPEN_DIAGNOSTICS
         handle = c_void_p()
         error = c_void_p()
-        status = lib().inillucent_open(
-            path.encode("utf-8"), flags, ctypes.byref(handle), ctypes.byref(error)
-        )
+        status = _open_native(path, flags, key, handle, error)
         check(status, error)
         self._handle = handle
         self._connections: List[Connection] = []
@@ -421,7 +454,7 @@ def connect(path: str, **options: Any) -> Connection:
     closing the connection is enough.
 
     @param path - the database file
-    @param options - passed to Database: create, read_only, diagnostics
+    @param options - passed to Database: create, read_only, diagnostics, key
     """
     database = Database(path, **options)
     connection = database.connect()

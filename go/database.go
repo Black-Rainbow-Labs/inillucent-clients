@@ -23,6 +23,13 @@ type Options struct {
 	// file system path or a bound value, so do not show it to a person and do
 	// not send it to a shared log.
 	Diagnostics bool
+	// Key creates an encrypted database or opens one. "x'" followed by 64 hex
+	// digits and a closing quote is a raw 32 byte key, and any other text is a
+	// passphrase, which the engine stretches with PBKDF2 so each open takes about
+	// a quarter of a second. The empty string means no key. A wrong key, a key
+	// for a plaintext file and no key for an encrypted file all fail as
+	// StatusCorrupt. The key is never logged or included in an error.
+	Key string
 }
 
 // flags returns the flags the C ABI takes for these options.
@@ -60,15 +67,23 @@ func Open(path string) (*Database, error) {
 
 // OpenWith opens a database file with explicit options.
 //
+// When options.Key is not empty the file is opened with inillucent_open_with_key,
+// and otherwise with inillucent_open.
+//
 // @param path - the database file
-// @param options - how to open it
+// @param options - how to open it, including the optional encryption key
 func OpenWith(path string, options Options) (*Database, error) {
 	calls, err := driver()
 	if err != nil {
 		return nil, err
 	}
 	var handle, failure uintptr
-	status := calls.open(path, options.flags(), &handle, &failure)
+	var status int32
+	if options.Key != "" {
+		status = calls.openWithKey(path, options.flags(), options.Key, &handle, &failure)
+	} else {
+		status = calls.open(path, options.flags(), &handle, &failure)
+	}
 	if err := check(calls, status, failure); err != nil {
 		return nil, err
 	}
@@ -260,9 +275,12 @@ func (conn *Conn) SchemaCookie() uint64 {
 
 // Cancel asks a running statement to stop.
 //
-// It always refuses as unsupported today, and Supports("cancel") says so before
-// an application draws a Stop button: the engine runs a statement whole rather
-// than a row at a time, so there is no point at which it could notice.
+// Supports("cancel") answers SupportPartial. The engine checks for a cancel at
+// every leaf of a scan and every batch a result collects, so a long scan, a
+// large result or a slow join stops with StatusInterrupted and the connection
+// stays usable. A single operator partway through one indivisible piece of
+// work, such as a sort of rows it has already read, finishes first, so a Stop
+// button should not promise an instant stop.
 func (conn *Conn) Cancel() error {
 	var failure uintptr
 	return check(conn.calls, conn.calls.cancel(conn.handle, &failure), failure)

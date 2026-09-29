@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import time
 from typing import Any, List
@@ -204,6 +205,53 @@ def run_case(case: dict) -> List[str]:
     return wrong
 
 
+def check_encryption() -> List[str]:
+    """Check that a keyed database hides its text and refuses a missing or wrong key.
+
+    Writes a secret through a raw key, reads the file bytes for it, reopens with
+    the key, and opens with no key and with another key expecting CORRUPT.
+    """
+    wrong: List[str] = []
+    folder = tempfile.mkdtemp(prefix="inillucent-encrypted-py-")
+    path = os.path.join(folder, "vault.rdb")
+    key = "x'" + "5a" * 32 + "'"
+    secret = "the vault code is 7461"
+    try:
+        with inillucent.connect(path, key=key) as db:
+            db.execute("CREATE TABLE vault (id INTEGER PRIMARY KEY, note TEXT)")
+            db.execute("INSERT INTO vault (note) VALUES (?1)", [secret])
+        for name in os.listdir(folder):
+            with open(os.path.join(folder, name), "rb") as handle:
+                if secret.encode() in handle.read():
+                    wrong.append(f"{name} holds the plaintext")
+        with inillucent.connect(path, key=key) as db:
+            notes = [row["note"] for row in db.query("SELECT note FROM vault")]
+            if notes != [secret]:
+                wrong.append(f"reopened with the key it read {notes!r}")
+            answer = list(db.query("PRAGMA encryption")[0].values())[0]
+            if answer != "xchacha20-poly1305":
+                wrong.append(f"PRAGMA encryption answered {answer!r}")
+        other = "x'" + "3c" * 32 + "'"
+        for label, options in (("no key", {}), ("a different key", {"key": other})):
+            try:
+                inillucent.connect(path, **options).close()
+                wrong.append(f"opening with {label} succeeded")
+            except inillucent.InillucentError as why:
+                if why.status != inillucent.CORRUPT:
+                    wrong.append(f"opening with {label} failed with {why.status_name}, not corrupt")
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    return wrong
+
+
+def check_cancel_is_partial() -> List[str]:
+    """Check that the capability table calls cancel partial."""
+    got = inillucent.supports("cancel")
+    if got != inillucent.SUPPORT_PARTIAL:
+        return [f"cancel is partial: a running statement stops at the next point the executor checks, but supports() answered {got}"]
+    return []
+
+
 def run(verbose: bool = True) -> List[str]:
     """Run every case in the suite and return every failure line.
 
@@ -215,6 +263,14 @@ def run(verbose: bool = True) -> List[str]:
     for case in suite["cases"]:
         name = case.get("name", "(unnamed)")
         wrong = run_case(case)
+        if verbose:
+            print(f"  {'FAIL' if wrong else 'ok  '}  {name}")
+        for problem in wrong:
+            if verbose:
+                print(f"          {problem}")
+            failures.append(f"{name}: {problem}")
+    for name, check in (("encryption", check_encryption), ("cancel_capability", check_cancel_is_partial)):
+        wrong = check()
         if verbose:
             print(f"  {'FAIL' if wrong else 'ok  '}  {name}")
         for problem in wrong:

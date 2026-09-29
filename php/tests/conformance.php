@@ -276,13 +276,76 @@ function check_capability_table(): array
             echo '  not supported: ', $row->name, PHP_EOL;
         }
     }
-    if (Driver::supports('cancel') !== Support::No) {
-        $wrong[] = 'cancel is declared unsupported, and a client that reported otherwise would'
-            . ' have an application drawing a Stop button that cannot work';
+    if (Driver::supports('cancel') !== Support::Partial) {
+        $wrong[] = 'cancel is partial: a running statement stops at the next point the executor'
+            . ' checks, and it is not instant';
     }
     if (Driver::supports('time_travel') !== Support::Unknown) {
         $wrong[] = 'a capability nobody declared must answer unknown rather than no: they mean'
             . ' different things, and one of them is a checked absence';
+    }
+    return $wrong;
+}
+
+/**
+ * Checks that a keyed database hides its text and refuses a missing or wrong key.
+ *
+ * Writes a secret through a raw key, reads the file bytes for it, reopens with
+ * the key, and opens with no key and with another key expecting Status::Corrupt.
+ *
+ * @return string[]
+ */
+function check_encryption(): array
+{
+    $wrong = [];
+    $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR
+        . 'inillucent-encrypted-php-' . getmypid() . '-' . bin2hex(random_bytes(6));
+    mkdir($directory, 0777, true);
+    $path = $directory . DIRECTORY_SEPARATOR . 'vault.rdb';
+    $key = "x'" . str_repeat('5a', 32) . "'";
+    $secret = 'the vault code is 7461';
+    try {
+        $database = Database::open($path, key: $key);
+        $connection = $database->connect();
+        $connection->execute('CREATE TABLE vault (id INTEGER PRIMARY KEY, note TEXT)');
+        $connection->execute('INSERT INTO vault (note) VALUES (?1)', [$secret]);
+        $connection->close();
+        $database->close();
+
+        foreach (glob($directory . DIRECTORY_SEPARATOR . '*') ?: [] as $file) {
+            if (str_contains((string) file_get_contents($file), $secret)) {
+                $wrong[] = basename($file) . ' holds the plaintext';
+            }
+        }
+        $database = Database::open($path, key: $key);
+        $connection = $database->connect();
+        $notes = array_column($connection->query('SELECT note FROM vault'), 'note');
+        if ($notes !== [$secret]) {
+            $wrong[] = 'reopened with the key it read ' . json_encode($notes);
+        }
+        $answer = $connection->scalar('PRAGMA encryption');
+        if ($answer !== 'xchacha20-poly1305') {
+            $wrong[] = 'PRAGMA encryption answered ' . json_encode($answer);
+        }
+        $connection->close();
+        $database->close();
+
+        $other = "x'" . str_repeat('3c', 32) . "'";
+        foreach (['no key' => null, 'a different key' => $other] as $label => $attempt) {
+            try {
+                Database::open($path, key: $attempt)->close();
+                $wrong[] = "opening with $label succeeded";
+            } catch (InillucentException $why) {
+                if ($why->status !== Status::Corrupt) {
+                    $wrong[] = "opening with $label failed with " . $why->status->label() . ', not corrupt';
+                }
+            }
+        }
+    } finally {
+        foreach (glob($directory . DIRECTORY_SEPARATOR . '*') ?: [] as $file) {
+            @unlink($file);
+        }
+        @rmdir($directory);
     }
     return $wrong;
 }
@@ -307,6 +370,13 @@ foreach ($suite['cases'] as $theCase) {
 }
 
 $failures = array_merge($failures, check_capability_table());
+
+$encryption = check_encryption();
+echo '  ', $encryption === [] ? 'ok  ' : 'FAIL', '  encryption', PHP_EOL;
+foreach ($encryption as $problem) {
+    echo '          ', $problem, PHP_EOL;
+}
+$failures = array_merge($failures, $encryption);
 
 echo PHP_EOL, count($suite['cases']), ' cases, ', count($failures), ' failures', PHP_EOL;
 exit($failures === [] ? 0 : 1);

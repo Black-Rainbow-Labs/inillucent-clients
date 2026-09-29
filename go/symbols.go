@@ -27,6 +27,7 @@ func bindSymbols(calls *driverCalls, handle uintptr) error {
 		{&calls.supports, "inillucent_supports"},
 
 		{&calls.open, "inillucent_open"},
+		{&calls.openWithKey, "inillucent_open_with_key"},
 		{&calls.closeDatabase, "inillucent_close"},
 		{&calls.checkpoint, "inillucent_checkpoint"},
 		{&calls.integrityCheck, "inillucent_integrity_check"},

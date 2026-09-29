@@ -57,6 +57,7 @@ public final class ConformanceTest {
         }
 
         failures.addAll(checkCapabilityTable());
+        failures.addAll(checkEncryptedDatabase());
 
         System.out.println();
         System.out.println(cases.size() + " cases, " + failures.size() + " failures");
@@ -323,6 +324,75 @@ public final class ConformanceTest {
     }
 
     /**
+     * Checks that an encrypted database keeps its text off disk, reads back with
+     * its key, reports its cipher, and refuses no key and a different key as
+     * corrupt.
+     */
+    private static List<String> checkEncryptedDatabase() throws Exception {
+        List<String> wrong = new ArrayList<>();
+        Path directory = Files.createTempDirectory("inillucent-java-encrypted-");
+        Path path = directory.resolve("encrypted.rdb");
+        String key = "x'" + "5a".repeat(32) + "'";
+        String otherKey = "x'" + "6b".repeat(32) + "'";
+        String secret = "the vault code is 7461";
+        try {
+            try (Database database = Database.open(path.toString(), Database.Options.defaults().key(key));
+                 Connection connection = database.connect()) {
+                connection.execute("CREATE TABLE vault (note TEXT)");
+                connection.execute("INSERT INTO vault (note) VALUES (?1)", List.of(secret));
+            }
+            try (var listing = Files.list(directory)) {
+                for (Path file : listing.toList()) {
+                    String bytes = new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1);
+                    if (bytes.contains(secret)) {
+                        wrong.add("encrypted: the plaintext appears in " + file.getFileName());
+                    }
+                }
+            }
+            try (Database database = Database.open(path.toString(), Database.Options.defaults().key(key));
+                 Connection connection = database.connect()) {
+                Object note = connection.scalar("SELECT note FROM vault");
+                if (!secret.equals(note)) {
+                    wrong.add("encrypted: the row read back as " + note);
+                }
+                Object mode = connection.scalar("PRAGMA encryption");
+                if (!"xchacha20-poly1305".equals(mode)) {
+                    wrong.add("encrypted: PRAGMA encryption answered " + mode);
+                }
+            }
+            wrong.addAll(expectCorrupt(path, Database.Options.defaults(), "opening without a key"));
+            wrong.addAll(expectCorrupt(path, Database.Options.defaults().key(otherKey),
+                "opening with a different key"));
+        } finally {
+            removeScratch(directory);
+        }
+        System.out.println("  " + (wrong.isEmpty() ? "ok  " : "FAIL") + "  encrypted database");
+        for (String problem : wrong) {
+            System.out.println("          " + problem);
+        }
+        return wrong;
+    }
+
+    /**
+     * Returns a problem line unless opening the database failed with Status.CORRUPT.
+     *
+     * @param path - the database file
+     * @param options - the options to try
+     * @param what - says which attempt this was
+     */
+    private static List<String> expectCorrupt(Path path, Database.Options options, String what) {
+        try (Database database = Database.open(path.toString(), options)) {
+            return List.of("encrypted: " + what + " must fail, and it opened");
+        } catch (InillucentException failure) {
+            if (failure.status() != Status.CORRUPT) {
+                return List.of("encrypted: " + what + " failed as " + failure.status()
+                    + " and must fail as corrupt");
+            }
+            return List.of();
+        }
+    }
+
+    /**
      * Checks the capability table, which is the other half of the surface.
      *
      * Reading it here also proves the C strings it hands back survive being
@@ -344,9 +414,13 @@ public final class ConformanceTest {
                 System.out.println("  not supported: " + row.name());
             }
         }
-        if (Inillucent.supports("cancel") != Support.NO) {
-            wrong.add("cancel is declared unsupported, and a client that reported otherwise would"
-                + " have an application drawing a Stop button that cannot work");
+        if (Inillucent.supports("cancel") != Support.PARTIAL) {
+            wrong.add("cancel is partial: a running statement stops at the next point the executor"
+                + " checks, and the engine answered " + Inillucent.supports("cancel"));
+        }
+        if (Inillucent.supports("encryption") != Support.YES) {
+            wrong.add("the engine declares encryption at rest as supported, and it answered "
+                + Inillucent.supports("encryption"));
         }
         if (Inillucent.supports("time_travel") != Support.UNKNOWN) {
             wrong.add("a capability nobody declared must answer unknown rather than no: they mean"

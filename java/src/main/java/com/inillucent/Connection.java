@@ -182,10 +182,12 @@ public final class Connection implements AutoCloseable {
     /**
      * Asks a running statement to stop.
      *
-     * This always throws UnsupportedFeatureException today, and
-     * Inillucent.supports("cancel") says so before an application draws a Stop
-     * button: the engine runs a statement whole rather than a row at a time, so
-     * there is no point at which it could notice.
+     * Inillucent.supports("cancel") answers Support.PARTIAL. The engine checks
+     * for a cancel at every leaf of a scan and every batch a result collects, so
+     * a long scan, a large result or a slow join stops with Status.INTERRUPTED
+     * and the connection stays usable. A single operator partway through one
+     * indivisible piece of work, such as a sort of rows it has already read,
+     * finishes first, so a Stop button should not promise an instant stop.
      */
     public void cancel() {
         try (Arena arena = Arena.ofConfined()) {

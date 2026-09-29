@@ -27,6 +27,15 @@ export interface OpenOptions {
    * them to a person and do not send them to a shared log.
    */
   diagnostics?: boolean;
+  /**
+   * Opens, and by default creates, an encrypted database.
+   *
+   * `x'<64 hex digits>'` is a raw 32 byte key. Anything else is a passphrase,
+   * which is stretched with PBKDF2 and costs about 0.25 seconds per open. A
+   * wrong key, a key for a plaintext file and no key for an encrypted file all
+   * fail with `Status.Corrupt`. Leave it out for a plaintext database.
+   */
+  key?: string;
 }
 
 /**
@@ -62,6 +71,20 @@ function openFlags(options: OpenOptions): number {
   if (options.readOnly) flags |= OPEN_READONLY;
   if (options.diagnostics) flags |= OPEN_DIAGNOSTICS;
   return flags;
+}
+
+/**
+ * Calls `inillucent_open_with_key` when a key was given and `inillucent_open`
+ * otherwise. The key is passed straight to the driver and is never logged.
+ * @param path - the database file
+ * @param options - how to open it, including an optional key
+ * @param out - receives the database handle
+ * @param error - receives the driver's error handle on failure
+ */
+function openNative(path: string, options: OpenOptions, out: [unknown], error: [unknown]): number {
+  const flags = openFlags(options);
+  if (options.key !== undefined) return calls().open_with_key(path, flags, options.key, out, error) as number;
+  return calls().open(path, flags, out, error) as number;
 }
 
 /**
@@ -305,9 +328,12 @@ export class Connection {
   /**
    * Asks a running statement to stop.
    *
-   * This always throws Unsupported today, and `supports('cancel')` says so
-   * before an application draws a Stop button: the engine runs a statement whole
-   * rather than a row at a time, so there is no point at which it could notice.
+   * `supports('cancel')` is `Support.Partial`. A running statement stops with
+   * `Status.Interrupted` at the next point the executor checks, which is every
+   * leaf of a scan and every batch a result collects, and the connection stays
+   * usable. A single operator part-way through one indivisible piece of work,
+   * such as a sort of the rows it has already read, finishes first. Draw a Stop
+   * button, but do not promise it is instant.
    */
   cancel(): void {
     const error: [unknown] = [null];
@@ -355,7 +381,7 @@ export class Database {
   constructor(path: string, options: OpenOptions = {}) {
     const out: [unknown] = [null];
     const error: [unknown] = [null];
-    check(calls().open(path, openFlags(options), out, error) as number, error);
+    check(openNative(path, options, out, error), error);
     this.#handle = out[0];
   }
 

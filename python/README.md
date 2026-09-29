@@ -163,6 +163,24 @@ Used as a context manager it commits on a clean exit and rolls back on an except
 statement rolls the whole transaction back before it raises, so a caller that stops at the first
 error has already undone everything.
 
+## Encrypted databases
+
+Pass `key` to open a database that is encrypted on disk. A key written as `x'` followed by 64 hex
+digits and a closing quote is a raw 32 byte key. Any other text is a passphrase, which costs about
+0.25 seconds on every open.
+
+```python
+import os
+import inillucent
+
+with inillucent.connect("vault.rdb", key=os.environ["VAULT_KEY"]) as db:
+    db.execute("CREATE TABLE IF NOT EXISTS notes (body TEXT)")
+```
+
+A wrong key, a key given for a plaintext file, and no key for an encrypted file all raise an
+`InillucentError` with status `inillucent.CORRUPT`. `PRAGMA encryption` answers `xchacha20-poly1305`
+on an encrypted database and `none` otherwise. Keep the key out of source control and out of logs.
+
 ## When the engine refuses
 
 ```python
@@ -181,7 +199,7 @@ than answering it wrongly, so an application can say "this engine cannot do that
 Ask first rather than after:
 
 ```python
-if inillucent.supports("cancel") != inillucent.SUPPORT_YES:
+if inillucent.supports("cancel") == inillucent.SUPPORT_NO:
     ...  # do not draw a Stop button
 
 for capability in inillucent.capabilities():

@@ -255,9 +255,13 @@ fn the_capability_table_can_be_read() {
 
     assert_eq!(
         inillucent::supports("cancel").unwrap(),
-        inillucent::Support::No,
-        "cancel is declared unsupported, and a client that reported otherwise would have an \
-         application drawing a Stop button that cannot work"
+        inillucent::Support::Partial,
+        "cancel is partial: a running statement stops at the next point the executor checks, and          a client that reported it as No or Yes would misdescribe the Stop button an application draws"
+    );
+    assert_eq!(
+        inillucent::supports("encryption").unwrap(),
+        inillucent::Support::Yes,
+        "the engine declares encryption at rest as supported"
     );
     assert_eq!(
         inillucent::supports("time_travel").unwrap(),
@@ -265,4 +269,73 @@ fn the_capability_table_can_be_read() {
         "a capability nobody declared must answer Unknown rather than No: they mean different \
          things, and one of them is a checked absence"
     );
+}
+
+/// Removes a database file and every write ahead log file beside it.
+///
+/// @param path - the database file
+fn remove_database_files(path: &std::path::Path) {
+    let name = path.file_name().unwrap().to_string_lossy().to_string();
+    let _ = fs::remove_file(path);
+    if let Ok(entries) = fs::read_dir(path.parent().unwrap()) {
+        for entry in entries.flatten() {
+            let other = entry.file_name().to_string_lossy().to_string();
+            if other.starts_with(&format!("{name}-wal")) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
+/// Returns whether the database file or any of its write ahead log files hold the text.
+///
+/// @param path - the database file
+/// @param needle - the text to look for
+fn files_contain(path: &std::path::Path, needle: &str) -> bool {
+    let name = path.file_name().unwrap().to_string_lossy().to_string();
+    let mut found = false;
+    for entry in fs::read_dir(path.parent().unwrap()).unwrap().flatten() {
+        let other = entry.file_name().to_string_lossy().to_string();
+        if other == name || other.starts_with(&format!("{name}-wal")) {
+            let bytes = fs::read(entry.path()).unwrap();
+            found |= bytes.windows(needle.len()).any(|window| window == needle.as_bytes());
+        }
+    }
+    found
+}
+
+#[test]
+fn an_encrypted_database_keeps_its_text_off_disk_and_needs_its_key() {
+    use inillucent::OpenOptions;
+
+    let path = scratch_path("encrypted");
+    let key = format!("x'{}'", "5a".repeat(32));
+    let other_key = format!("x'{}'", "6b".repeat(32));
+    let secret = "the vault code is 7461";
+    let keyed = |key: &str| OpenOptions { key: Some(key.to_string()), ..OpenOptions::default() };
+
+    let db = Database::open_with(&path, keyed(&key)).expect("a new database opens with a key");
+    let conn = db.connect().unwrap();
+    conn.run("CREATE TABLE vault (note TEXT)").unwrap();
+    conn.execute("INSERT INTO vault (note) VALUES (?1)", &[Value::Text(secret.to_string())], None).unwrap();
+    drop(conn);
+    db.close().unwrap();
+
+    assert!(!files_contain(&path, secret), "the plaintext appears in the encrypted file or its log");
+
+    let db = Database::open_with(&path, keyed(&key)).expect("the same key opens the file again");
+    let conn = db.connect().unwrap();
+    let rows = conn.run("SELECT note FROM vault").unwrap();
+    assert_eq!(rows.rows[0][0], Value::Text(secret.to_string()));
+    let pragma = conn.run("PRAGMA encryption").unwrap();
+    assert_eq!(pragma.rows[0][0], Value::Text("xchacha20-poly1305".to_string()));
+    drop(conn);
+    db.close().unwrap();
+
+    let without = Database::open(&path).err().expect("opening an encrypted file without a key must fail");
+    assert_eq!(without.status, Status::Corrupt);
+    let wrong = Database::open_with(&path, keyed(&other_key)).err().expect("a different key must fail");
+    assert_eq!(wrong.status, Status::Corrupt);
+
+    remove_database_files(&path);
 }

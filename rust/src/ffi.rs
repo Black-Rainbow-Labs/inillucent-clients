@@ -101,6 +101,7 @@ pub struct Driver {
     pub supports: unsafe extern "C" fn(*const c_char) -> i32,
 
     pub open: unsafe extern "C" fn(*const c_char, u32, *mut *mut c_void, *mut *mut c_void) -> i32,
+    pub open_with_key: unsafe extern "C" fn(*const c_char, u32, *const c_char, *mut *mut c_void, *mut *mut c_void) -> i32,
     pub close: unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> i32,
     pub checkpoint: unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> i32,
     pub integrity_check: unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> i32,
@@ -209,6 +210,7 @@ fn load() -> Result<Driver, LoadError> {
             capability: symbol(&library, b"inillucent_capability")?,
             supports: symbol(&library, b"inillucent_supports")?,
             open: symbol(&library, b"inillucent_open")?,
+            open_with_key: symbol(&library, b"inillucent_open_with_key")?,
             close: symbol(&library, b"inillucent_close")?,
             checkpoint: symbol(&library, b"inillucent_checkpoint")?,
             integrity_check: symbol(&library, b"inillucent_integrity_check")?,

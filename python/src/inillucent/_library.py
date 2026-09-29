@@ -109,6 +109,9 @@ def declare_database_functions(lib) -> None:
     """Declare the signatures of the database and connection calls."""
     lib.inillucent_open.argtypes = [c_char_p, c_uint32, POINTER(c_void_p), POINTER(c_void_p)]
     lib.inillucent_open.restype = c_int32
+    lib.inillucent_open_with_key.argtypes = [c_char_p, c_uint32, c_char_p,
+                                             POINTER(c_void_p), POINTER(c_void_p)]
+    lib.inillucent_open_with_key.restype = c_int32
     for name in ("inillucent_close", "inillucent_checkpoint", "inillucent_integrity_check"):
         getattr(lib, name).argtypes = [c_void_p, POINTER(c_void_p)]
         getattr(lib, name).restype = c_int32

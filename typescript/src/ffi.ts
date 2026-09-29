@@ -88,6 +88,7 @@ function declare(lib: { func: (signature: string) => unknown }): Record<string, 
     supports: of('int32_t inillucent_supports(const char *name)'),
 
     open: of('int32_t inillucent_open(const char *path, uint32_t flags, _Out_ void **out, _Out_ void **error)'),
+    open_with_key: of('int32_t inillucent_open_with_key(const char *path, uint32_t flags, const char *key, _Out_ void **out, _Out_ void **error)'),
     close: of('int32_t inillucent_close(void *db, _Out_ void **error)'),
     checkpoint: of('int32_t inillucent_checkpoint(void *db, _Out_ void **error)'),
     integrity_check: of('int32_t inillucent_integrity_check(void *db, _Out_ void **error)'),

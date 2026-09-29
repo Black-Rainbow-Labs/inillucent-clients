@@ -11,6 +11,8 @@ shared library built from the engine:
 
 `inillucent_driver.h` in this directory is the contract, copied from the engine
 so that a C or C++ program can compile against it without cloning the engine.
+It is ABI 1.1.0, which added `inillucent_open_with_key` for encrypted
+databases. The clients need a library at that version or later.
 
 ## Getting it
 

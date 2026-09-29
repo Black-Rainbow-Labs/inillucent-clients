@@ -207,7 +207,7 @@ your spelling", and `Feature` names the construct.
 Ask first rather than after:
 
 ```go
-if support, _ := inillucent.Supports("cancel"); support != inillucent.SupportYes {
+if support, _ := inillucent.Supports("cancel"); support == inillucent.SupportNo {
     // do not draw a Stop button
 }
 
@@ -216,6 +216,21 @@ for _, capability := range capabilities {
     fmt.Println(capability.Name, capability.Support, capability.Note)
 }
 ```
+
+## Encrypted databases
+
+Set `Key` in `Options` to create or open an encrypted database. A key written as `x'` followed by 64
+hex digits and a closing quote is a raw 32 byte key. Any other text is a passphrase, and opening with
+a passphrase takes about a quarter of a second.
+
+```go
+key := "x'" + strings.Repeat("5a", 32) + "'"
+db, err := inillucent.OpenWith("vault.rdb", inillucent.Options{Key: key})
+```
+
+A wrong key, a key for a plaintext file and no key for an encrypted file all fail with
+`StatusCorrupt`. `PRAGMA encryption` answers `xchacha20-poly1305` on an encrypted database and
+`none` on any other. The key is never written to a log or to an error message.
 
 ## Goroutines
 

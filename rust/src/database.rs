@@ -262,11 +262,15 @@ impl Statement<'_> {
 
     /// Binds one value at a one based parameter position.
     ///
+    /// The engine refuses an index of 0, or one past the statement's parameter
+    /// count, with `Status::InvalidState`. That refusal is returned, so a value
+    /// with no placeholder is never dropped without a word.
+    ///
     /// @param index - the one based parameter position
     /// @param value - what to bind
     pub fn bind(&mut self, index: u32, value: &Value) -> Result<()> {
         let calls = driver()?;
-        unsafe {
+        let status = unsafe {
             match value {
                 Value::Null => (calls.bind_null)(self.handle, index),
                 Value::Integer(whole) => (calls.bind_int)(self.handle, index, *whole),
@@ -282,7 +286,20 @@ impl Statement<'_> {
                 }
             }
         };
-        Ok(())
+        if status == 0 {
+            return Ok(());
+        }
+        let status = Status::from_code(status);
+        Err(Error {
+            status,
+            message: format!(
+                "binding parameter {index} failed with {}: the statement has no parameter at that position",
+                status.name()
+            ),
+            feature: None,
+            detail: None,
+            offset: None,
+        })
     }
 }
 
@@ -424,12 +441,58 @@ impl Connection<'_> {
     /// indivisible piece of work, such as a sort of rows it has already read,
     /// finishes first, so a Stop button should not promise an instant stop.
     pub fn cancel(&self) -> Result<()> {
-        let calls = driver()?;
-        let mut error: *mut c_void = std::ptr::null_mut();
-        unsafe {
-            let status = (calls.cancel)(self.handle, &mut error);
-            check(calls, status, error)
-        }
+        cancel_connection(self.handle)
+    }
+
+    /// Returns a handle that cancels this connection's running statement from
+    /// another thread.
+    ///
+    /// A `Connection` is neither `Send` nor `Sync`, so a statement running on it
+    /// blocks the only thread that could call `cancel`. The handle this returns
+    /// is both, and it borrows the connection, so the compiler stops it outliving
+    /// the connection. Use it with `std::thread::scope`.
+    pub fn cancel_handle(&self) -> CancelHandle<'_> {
+        CancelHandle { handle: self.handle, held: PhantomData }
+    }
+}
+
+/// Asks the statement running on a connection to stop.
+///
+/// @param handle - the C connection handle
+fn cancel_connection(handle: *mut c_void) -> Result<()> {
+    let calls = driver()?;
+    let mut error: *mut c_void = std::ptr::null_mut();
+    unsafe {
+        let status = (calls.cancel)(handle, &mut error);
+        check(calls, status, error)
+    }
+}
+
+/// Cancels a connection's running statement from another thread.
+///
+/// Made by [`Connection::cancel_handle`]. The C header names
+/// `inillucent_cancel` as the one call that is safe from another thread while a
+/// statement runs, because it sets a flag rather than touching the statement.
+/// This type exposes that call and nothing else, which is why it may cross
+/// threads when the connection may not.
+pub struct CancelHandle<'c> {
+    handle: *mut c_void,
+    held: PhantomData<&'c Connection<'c>>,
+}
+
+// SAFETY: the only call this type makes is inillucent_cancel, which the header
+// documents as safe from another thread, and the borrow keeps the connection
+// alive for as long as the handle exists.
+unsafe impl Send for CancelHandle<'_> {}
+unsafe impl Sync for CancelHandle<'_> {}
+
+impl CancelHandle<'_> {
+    /// Asks the statement running on the connection to stop.
+    ///
+    /// The statement fails with `Status::Interrupted` and the connection stays
+    /// usable. A cancel with nothing running cancels nothing.
+    pub fn cancel(&self) -> Result<()> {
+        cancel_connection(self.handle)
     }
 }
 

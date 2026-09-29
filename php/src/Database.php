@@ -89,7 +89,7 @@ final class Database
         $ffi = Driver::ffi();
         $out = $ffi->new('inillucent_conn*[1]');
         $error = $ffi->new('inillucent_error*[1]');
-        InillucentException::check($ffi->inillucent_connect($this->handle, $out, $error), $error);
+        InillucentException::check($ffi->inillucent_connect($this->live(), $out, $error), $error);
         $connection = new Connection($this, $out[0]);
         $this->connections[] = $connection;
         return $connection;
@@ -98,7 +98,7 @@ final class Database
     /** Returns the file this database is in. */
     public function path(): string
     {
-        return Driver::readString(Driver::ffi()->inillucent_path($this->handle)) ?? '';
+        return Driver::readString(Driver::ffi()->inillucent_path($this->live())) ?? '';
     }
 
     /** Makes everything written so far durable in the file. */
@@ -125,7 +125,7 @@ final class Database
         $ffi = Driver::ffi();
         $error = $ffi->new('inillucent_error*[1]');
         InillucentException::check(
-            $ffi->inillucent_backup_to($this->handle, $path, $error),
+            $ffi->inillucent_backup_to($this->live(), $path, $error),
             $error
         );
     }
@@ -139,7 +139,7 @@ final class Database
     {
         $ffi = Driver::ffi();
         $error = $ffi->new('inillucent_error*[1]');
-        InillucentException::check($ffi->$name($this->handle, $error), $error);
+        InillucentException::check($ffi->$name($this->live(), $error), $error);
     }
 
     /**
@@ -147,7 +147,10 @@ final class Database
      *
      * The C library refuses to close a database that still has connections on
      * it, which is deliberate: freeing it then would leave them pointing at
-     * memory that is gone. Closing twice is safe.
+     * memory that is gone. A statement or transaction that is still open keeps
+     * its connection alive, so the close then throws Status::InvalidState and
+     * the database stays open and usable. Close the statement or transaction and
+     * close the database again. Closing twice is safe.
      */
     public function close(): void
     {
@@ -158,10 +161,25 @@ final class Database
             $connection->close();
         }
         $this->connections = [];
-        $closing = $this->handle;
-        $this->handle = null;
         $ffi = Driver::ffi();
         $error = $ffi->new('inillucent_error*[1]');
-        InillucentException::check($ffi->inillucent_close($closing, $error), $error);
+        // The handle is only forgotten once the engine has let it go. Clearing it
+        // first would lose a database the engine refused to close, and nothing
+        // could ever close it after that.
+        InillucentException::check($ffi->inillucent_close($this->handle, $error), $error);
+        $this->handle = null;
+    }
+
+    /**
+     * Returns the C handle, or throws Status::InvalidState once the database is
+     * closed, so a call after close() is an error and never a null pointer
+     * handed to the engine.
+     */
+    private function live(): mixed
+    {
+        if ($this->handle === null) {
+            throw InillucentException::closed('database');
+        }
+        return $this->handle;
     }
 }

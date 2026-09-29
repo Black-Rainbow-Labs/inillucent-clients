@@ -12,14 +12,20 @@ import json
 import os
 import shutil
 import tempfile
-import time
 from typing import Any, List
 
 import inillucent
 
+# INILLUCENT_SUITE names another suite file, which is how a test proves this
+# runner fails when an expected value is changed.
 SUITE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "conformance", "suite.json")
+    os.environ.get("INILLUCENT_SUITE")
+    or os.path.join(os.path.dirname(__file__), "..", "..", "conformance", "suite.json")
 )
+
+# The capabilities this runner has. It holds a real connection for the whole
+# case, so a session outlives each step.
+CAPABILITIES = {"session"}
 
 
 def value_of(described: dict) -> Any:
@@ -146,15 +152,15 @@ def check_failure(step: dict, failure: inillucent.InillucentError, wrong: List[s
             wrong.append("an unsupported refusal must carry a feature")
 
 
-def scratch_path(name: str) -> str:
-    """Return a database path nothing else is using.
+def scratch_folder(name: str) -> str:
+    """Create a folder nothing else is using, for one case's database.
 
-    @param name - the case name, so a leftover file says which case left it
+    The engine writes log files beside the database file, so the case removes
+    the whole folder when it ends rather than only the file it named.
+
+    @param name - the case name, so a leftover folder says which case left it
     """
-    return os.path.join(
-        tempfile.gettempdir(),
-        f"inillucent-conformance-py-{name}-{os.getpid()}-{time.time_ns()}.rdb",
-    )
+    return tempfile.mkdtemp(prefix=f"inillucent-conformance-py-{name}-")
 
 
 def run_case(case: dict) -> List[str]:
@@ -166,7 +172,8 @@ def run_case(case: dict) -> List[str]:
 
     @param case - one entry from the suite's cases
     """
-    path = scratch_path(case.get("name", "unnamed"))
+    folder = scratch_folder(case.get("name", "unnamed"))
+    path = os.path.join(folder, "case.rdb")
     per_call = case.get("connection") == "per_call"
     wrong: List[str] = []
     database = inillucent.Database(path)
@@ -198,10 +205,7 @@ def run_case(case: dict) -> List[str]:
     finally:
         connection.close()
         database.close()
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+        shutil.rmtree(folder, ignore_errors=True)
     return wrong
 
 
@@ -252,16 +256,42 @@ def check_cancel_is_partial() -> List[str]:
     return []
 
 
+def runnable(case: dict) -> bool:
+    """Return whether this runner has every capability a case needs.
+
+    @param case - one entry from the suite's cases
+    """
+    return all(need in CAPABILITIES for need in case.get("needs", []))
+
+
+def load_suite(path: str) -> dict:
+    """Read the suite file.
+
+    json.load parses a JSON integer to a Python int, which has no size limit, so
+    9223372036854775807 arrives exactly and is never carried through a double.
+
+    @param path - the suite file
+    """
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def run(verbose: bool = True) -> List[str]:
     """Run every case in the suite and return every failure line.
 
     @param verbose - print a line per case as it runs
     """
-    with open(SUITE, encoding="utf-8") as handle:
-        suite = json.load(handle)
+    suite = load_suite(SUITE)
     failures: List[str] = []
-    for case in suite["cases"]:
+    cases = suite["cases"]
+    ran = 0
+    for case in cases:
         name = case.get("name", "(unnamed)")
+        if not runnable(case):
+            if verbose:
+                print(f"  skipping  {name}: needs {case.get('needs')}")
+            continue
+        ran += 1
         wrong = run_case(case)
         if verbose:
             print(f"  {'FAIL' if wrong else 'ok  '}  {name}")
@@ -269,6 +299,8 @@ def run(verbose: bool = True) -> List[str]:
             if verbose:
                 print(f"          {problem}")
             failures.append(f"{name}: {problem}")
+    if verbose:
+        print(f"\n  {ran} of {len(cases)} cases")
     for name, check in (("encryption", check_encryption), ("cancel_capability", check_cancel_is_partial)):
         wrong = check()
         if verbose:

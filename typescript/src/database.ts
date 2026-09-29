@@ -7,6 +7,7 @@
  */
 
 import { check } from './check.js';
+import { InillucentError, Status } from './errors.js';
 import { NO_LIMIT, calls } from './ffi.js';
 import { Rows, type RowObject, type Value } from './rows.js';
 
@@ -38,6 +39,27 @@ export interface OpenOptions {
   key?: string;
 }
 
+/** The database each connection, statement and transaction belongs to. */
+const owners = new WeakMap<object, Database>();
+
+/** The statements and transactions still alive on each database. */
+const children = new WeakMap<Database, Set<object>>();
+
+/** The databases that have a call running on a worker thread right now. */
+const running = new WeakSet<Database>();
+
+/**
+ * Frees a connection's handle without closing the database it may own.
+ *
+ * It is a symbol rather than a method name so that it stays out of the public
+ * API. `Database.close()` uses it, because calling `Connection.close()` there
+ * would close the database again from inside its own close.
+ */
+export const releaseHandle = Symbol('releaseHandle');
+
+/** How koffi calls a declared function on a worker thread. */
+type AsyncCall = { async: (...args: unknown[]) => void };
+
 /**
  * Returns the C limit for a caller's limit, where undefined is every row.
  * @param limit - rows to hand back, or undefined
@@ -59,6 +81,83 @@ function capped(limit?: number): bigint {
  */
 function nonNull(bytes: Buffer): Buffer {
   return bytes.length === 0 ? Buffer.alloc(1) : bytes;
+}
+
+/**
+ * Records that a statement or transaction is alive on a database.
+ * @param child - the statement or transaction
+ * @param database - the database it was made on
+ */
+function track(child: object, database: Database | undefined): void {
+  if (!database) return;
+  owners.set(child, database);
+  children.get(database)?.add(child);
+}
+
+/**
+ * Records that a statement or transaction has been freed.
+ * @param child - the statement or transaction
+ */
+function untrack(child: object): void {
+  const database = owners.get(child);
+  if (database) children.get(database)?.delete(child);
+}
+
+/**
+ * Throws `Status.Busy` while a call started with `executeAsync` is still running
+ * on the database this object belongs to.
+ *
+ * The engine is single threaded and has no lock inside, so a second call made
+ * while the first runs on a worker thread would race it. `cancel()` is the one
+ * call that is safe from another thread, and it does not come through here.
+ *
+ * @param of - a database, or a connection, statement or transaction on one
+ */
+function assertIdle(of: object): void {
+  const database = of instanceof Database ? of : owners.get(of);
+  if (!database || !running.has(database)) return;
+  throw new InillucentError(
+    Status.Busy,
+    'a statement started with executeAsync is still running on this database. ' +
+      'Wait for it to finish, or call cancel() on its connection',
+  );
+}
+
+/** Returns the error for a call on a transaction that has already ended. */
+function transactionEnded(): InillucentError {
+  return new InillucentError(
+    Status.InvalidState,
+    'the transaction has already ended, by a commit, a rollback, or a statement that failed and rolled it back',
+  );
+}
+
+/**
+ * Runs one C call that produces a result on a koffi worker thread, and resolves
+ * with the result copied into JavaScript.
+ *
+ * The database is marked as running until the call settles, so every other
+ * call on it is refused with `Status.Busy` instead of racing this one.
+ *
+ * @param database - the database the call runs on
+ * @param fn - the declared C function, which takes `out` and `error` last
+ * @param args - every argument before `out` and `error`
+ */
+function runAsync(database: Database, fn: unknown, args: unknown[]): Promise<Rows> {
+  const out: [unknown] = [null];
+  const error: [unknown] = [null];
+  running.add(database);
+  return new Promise((resolve, reject) => {
+    (fn as AsyncCall).async(...args, out, error, (failure: unknown, status: number) => {
+      running.delete(database);
+      try {
+        if (failure) throw failure;
+        check(status, error);
+        resolve(new Rows(out[0]));
+      } catch (why) {
+        reject(why);
+      }
+    });
+  });
 }
 
 /**
@@ -107,39 +206,94 @@ export class Transaction {
    * Runs one statement inside the transaction and returns the rows it changed.
    *
    * A failure rolls the whole transaction back before it throws, so a caller
-   * that stops at the first error has already undone everything.
+   * that stops at the first error has already undone everything. The handle is
+   * spent then, so it is freed here, and a later `execute` or `commit` fails
+   * with `Status.InvalidState`.
    *
    * @param sql - the statement to run
    */
   execute(sql: string): number {
+    if (!this.#handle) throw transactionEnded();
+    assertIdle(this);
     const changed: [number] = [0];
     const error: [unknown] = [null];
-    check(calls().txn_execute(this.#handle, sql, changed, error) as number, error);
+    const status = calls().txn_execute(this.#handle, sql, changed, error) as number;
+    if (status !== Status.Ok) this.#free();
+    check(status, error);
     const count = Number(changed[0]);
     this.affected.push(count);
     return count;
   }
 
-  /** Commits the transaction. The handle is spent either way. */
+  /**
+   * Commits the transaction. The handle is spent either way.
+   *
+   * Committing a transaction that has already ended fails with
+   * `Status.InvalidState`, because a caller who believes a write was committed
+   * when it was not has lost that write without knowing.
+   */
   commit(): void {
-    if (!this.#handle) return;
+    if (!this.#handle) throw transactionEnded();
+    assertIdle(this);
     const error: [unknown] = [null];
     const status = calls().txn_commit(this.#handle, error) as number;
-    const handle = this.#handle;
-    this.#handle = undefined;
-    try {
-      check(status, error);
-    } finally {
-      calls().txn_rollback(handle);
-    }
+    this.#free();
+    check(status, error);
   }
 
-  /** Rolls the transaction back and frees it. */
+  /** Rolls the transaction back and frees it. Rolling back an ended transaction does nothing. */
   rollback(): void {
     if (!this.#handle) return;
+    assertIdle(this);
+    this.#free();
+  }
+
+  /**
+   * Frees the handle. `inillucent_txn_rollback` is the only free the ABI has,
+   * and after a commit or a failure it frees without undoing anything.
+   */
+  #free(): void {
     calls().txn_rollback(this.#handle);
     this.#handle = undefined;
+    untrack(this);
   }
+
+  /** Rolls back a transaction that was neither committed nor rolled back. */
+  [Symbol.dispose](): void {
+    this.rollback();
+  }
+}
+
+/**
+ * Binds one value with the call its JavaScript type needs, and returns the
+ * status the call reported.
+ * @param handle - the statement handle
+ * @param index - the one based parameter position
+ * @param value - what to bind
+ */
+function bindOne(handle: unknown, index: number, value: Value | boolean | undefined): number {
+  const c = calls();
+  if (value === null || value === undefined) return c.bind_null(handle, index) as number;
+  if (typeof value === 'boolean') return c.bind_int(handle, index, value ? 1 : 0) as number;
+  if (typeof value === 'bigint') return c.bind_int(handle, index, value) as number;
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) return c.bind_int(handle, index, value) as number;
+    return c.bind_real(handle, index, value) as number;
+  }
+  if (typeof value === 'string') {
+    const bytes = Buffer.from(value, 'utf8');
+    return c.bind_text(handle, index, nonNull(bytes), bytes.length) as number;
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    const bytes = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+    return c.bind_blob(handle, index, nonNull(bytes), bytes.length) as number;
+  }
+  throw new TypeError(
+    `cannot bind a ${typeof value}. The engine stores NULL, integers, reals, text and ` +
+      'bytes, and converting anything else would be this library deciding what your ' +
+      'value means.',
+  );
 }
 
 /** A compiled statement and the values bound to it. */
@@ -150,6 +304,7 @@ export class Statement {
   constructor(connection: Connection, handle: unknown) {
     this.#connection = connection;
     this.#handle = handle;
+    track(this, owners.get(connection));
   }
 
   /**
@@ -158,52 +313,65 @@ export class Statement {
    * @param limit - rows to hand back, or undefined for every row
    */
   execute(params: readonly Value[] = [], limit?: number): Rows {
-    const c = calls();
-    c.clear_bindings(this.#handle);
-    params.forEach((value, nth) => this.bind(nth + 1, value));
+    this.#bindAll(params);
     const out: [unknown] = [null];
     const error: [unknown] = [null];
-    check(c.stmt_execute(this.#handle, capped(limit), out, error) as number, error);
+    check(calls().stmt_execute(this.#handle, capped(limit), out, error) as number, error);
     return new Rows(out[0]);
   }
 
   /**
+   * Binds these values and runs the statement on a worker thread, so the event
+   * loop stays free and `cancel()` on the connection can stop it.
+   *
+   * Every other call on this database is refused with `Status.Busy` until the
+   * promise settles, because the engine has no lock inside.
+   *
+   * @param params - values for ?1, ?2 and so on, in order
+   * @param limit - rows to hand back, or undefined for every row
+   */
+  executeAsync(params: readonly Value[] = [], limit?: number): Promise<Rows> {
+    this.#bindAll(params);
+    return runAsync(owners.get(this.#connection)!, calls().stmt_execute, [this.#handle, capped(limit)]);
+  }
+
+  /**
+   * Clears the previous bindings and binds these values in order.
+   * @param params - values for ?1, ?2 and so on, in order
+   */
+  #bindAll(params: readonly Value[]): void {
+    assertIdle(this);
+    calls().clear_bindings(this.#handle);
+    params.forEach((value, nth) => this.bind(nth + 1, value));
+  }
+
+  /**
    * Binds one value, choosing the call by the JavaScript type.
+   *
+   * The engine refuses a position past the statement's last placeholder with
+   * `Status.InvalidState`, and so does a closed statement. That refusal is
+   * thrown rather than ignored, because ignoring it drops the value silently.
+   *
    * @param index - the one based parameter position
    * @param value - what to bind
    */
   bind(index: number, value: Value | boolean | undefined): void {
-    const c = calls();
-    if (value === null || value === undefined) {
-      c.bind_null(this.#handle, index);
-    } else if (typeof value === 'boolean') {
-      c.bind_int(this.#handle, index, value ? 1 : 0);
-    } else if (typeof value === 'bigint') {
-      c.bind_int(this.#handle, index, value);
-    } else if (typeof value === 'number') {
-      if (Number.isInteger(value)) c.bind_int(this.#handle, index, value);
-      else c.bind_real(this.#handle, index, value);
-    } else if (typeof value === 'string') {
-      const bytes = Buffer.from(value, 'utf8');
-      c.bind_text(this.#handle, index, nonNull(bytes), bytes.length);
-    } else if (ArrayBuffer.isView(value)) {
-      const view = value as ArrayBufferView;
-      const bytes = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
-      c.bind_blob(this.#handle, index, nonNull(bytes), bytes.length);
-    } else {
-      throw new TypeError(
-        `cannot bind a ${typeof value}. The engine stores NULL, integers, reals, text and ` +
-          'bytes, and converting anything else would be this library deciding what your ' +
-          'value means.',
-      );
-    }
+    assertIdle(this);
+    const status = bindOne(this.#handle, index, value);
+    if (status === Status.Ok) return;
+    throw new InillucentError(
+      status,
+      `binding ?${index} was refused: the statement has fewer placeholders than that, or it is closed`,
+    );
   }
 
-  /** Frees the statement. */
+  /** Frees the statement. Closing it a second time does nothing. */
   close(): void {
     if (!this.#handle) return;
+    assertIdle(this);
     calls().stmt_free(this.#handle);
     this.#handle = undefined;
+    untrack(this);
   }
 
   [Symbol.dispose](): void {
@@ -226,6 +394,7 @@ export class Connection {
     this.#database = database;
     this.#handle = handle;
     this.#ownsDatabase = ownsDatabase;
+    owners.set(this, database);
   }
 
   /**
@@ -240,6 +409,7 @@ export class Connection {
    * @param limit - rows to hand back, or undefined for every row
    */
   execute(sql: string, params: readonly Value[] = [], limit?: number): Rows {
+    assertIdle(this);
     if (params.length > 0) {
       const statement = this.prepare(sql);
       try {
@@ -252,6 +422,33 @@ export class Connection {
     const error: [unknown] = [null];
     check(calls().execute(this.#handle, sql, capped(limit), out, error) as number, error);
     return new Rows(out[0]);
+  }
+
+  /**
+   * Runs one statement on a worker thread and resolves with everything it
+   * produced.
+   *
+   * The event loop stays free while it runs, so a timer, a request handler or a
+   * Stop button can call `cancel()` and the statement fails with
+   * `Status.Interrupted`. Every other call on this database is refused with
+   * `Status.Busy` until the promise settles, because the engine is single
+   * threaded and has no lock inside.
+   *
+   * @param sql - the statement to run
+   * @param params - values for ?1, ?2 and so on, in order
+   * @param limit - rows to hand back, or undefined for every row
+   */
+  async executeAsync(sql: string, params: readonly Value[] = [], limit?: number): Promise<Rows> {
+    assertIdle(this);
+    if (params.length > 0) {
+      const statement = this.prepare(sql);
+      try {
+        return await statement.executeAsync(params, limit);
+      } finally {
+        statement.close();
+      }
+    }
+    return runAsync(this.#database, calls().execute, [this.#handle, sql, capped(limit)]);
   }
 
   /**
@@ -278,6 +475,7 @@ export class Connection {
    * @param sql - the statements to run
    */
   executeBatch(sql: string): void {
+    assertIdle(this);
     const error: [unknown] = [null];
     check(calls().execute_batch(this.#handle, sql, error) as number, error);
   }
@@ -287,6 +485,7 @@ export class Connection {
    * @param sql - the statement to compile
    */
   prepare(sql: string): Statement {
+    assertIdle(this);
     const out: [unknown] = [null];
     const error: [unknown] = [null];
     check(calls().prepare(this.#handle, sql, out, error) as number, error);
@@ -295,24 +494,30 @@ export class Connection {
 
   /** Opens a transaction. */
   transaction(): Transaction {
+    assertIdle(this);
     const out: [unknown] = [null];
     const error: [unknown] = [null];
     check(calls().txn_begin(this.#handle, out, error) as number, error);
-    return new Transaction(out[0]);
+    const transaction = new Transaction(out[0]);
+    track(transaction, this.#database);
+    return transaction;
   }
 
   /** The rowid the most recent insert on this connection produced. */
   get lastInsertRowid(): number {
+    assertIdle(this);
     return Number(calls().last_insert_rowid(this.#handle));
   }
 
   /** How many rows every statement on this connection has changed. */
   get totalChanges(): number {
+    assertIdle(this);
     return Number(calls().total_changes(this.#handle));
   }
 
   /** Whether a transaction is open on this connection. */
   get inTransaction(): boolean {
+    assertIdle(this);
     return Boolean(calls().in_transaction(this.#handle));
   }
 
@@ -322,6 +527,7 @@ export class Connection {
    * Compare it to know whether a cached table description is stale.
    */
   get schemaCookie(): number {
+    assertIdle(this);
     return Number(calls().schema_cookie(this.#handle));
   }
 
@@ -334,6 +540,10 @@ export class Connection {
    * usable. A single operator part-way through one indivisible piece of work,
    * such as a sort of the rows it has already read, finishes first. Draw a Stop
    * button, but do not promise it is instant.
+   *
+   * A statement run with `execute` blocks the event loop until it ends, so
+   * nothing in the same thread can call this while it runs. Start the statement
+   * with `executeAsync` to be able to stop it.
    */
   cancel(): void {
     const error: [unknown] = [null];
@@ -350,16 +560,24 @@ export class Connection {
     this.#ownsDatabase = true;
   }
 
+  /** Frees the connection's handle and nothing else. `Database.close()` calls it. */
+  [releaseHandle](): void {
+    if (!this.#handle) return;
+    calls().conn_free(this.#handle);
+    this.#handle = undefined;
+  }
+
   /**
    * Frees the connection, and the database too when this connection owns it.
    *
    * A connection from `connect()` owns its database, because the caller was
-   * never handed one to close.
+   * never handed one to close. When the engine refuses to close that database
+   * because a statement or transaction is still alive, the database stays open,
+   * and calling this again after freeing them closes it.
    */
   close(): void {
-    if (!this.#handle) return;
-    calls().conn_free(this.#handle);
-    this.#handle = undefined;
+    assertIdle(this);
+    this[releaseHandle]();
     if (this.#ownsDatabase) this.#database.close();
   }
 
@@ -383,10 +601,12 @@ export class Database {
     const error: [unknown] = [null];
     check(openNative(path, options, out, error), error);
     this.#handle = out[0];
+    children.set(this, new Set());
   }
 
   /** Opens a connection, and with it a session. */
   connect(): Connection {
+    assertIdle(this);
     const out: [unknown] = [null];
     const error: [unknown] = [null];
     check(calls().connect(this.#handle, out, error) as number, error);
@@ -397,17 +617,20 @@ export class Database {
 
   /** The file this database is in. */
   get path(): string {
+    assertIdle(this);
     return (calls().path(this.#handle) as string) ?? '';
   }
 
   /** Makes everything written so far durable in the file. */
   checkpoint(): void {
+    assertIdle(this);
     const error: [unknown] = [null];
     check(calls().checkpoint(this.#handle, error) as number, error);
   }
 
   /** Walks every tree and throws on the first thing that is wrong. */
   integrityCheck(): void {
+    assertIdle(this);
     const error: [unknown] = [null];
     check(calls().integrity_check(this.#handle, error) as number, error);
   }
@@ -420,6 +643,7 @@ export class Database {
    * @param path - where to write the copy
    */
   backupTo(path: string): void {
+    assertIdle(this);
     const error: [unknown] = [null];
     check(calls().backup_to(this.#handle, path, error) as number, error);
   }
@@ -427,18 +651,25 @@ export class Database {
   /**
    * Checkpoints and closes, closing every connection first.
    *
-   * The C library refuses to close a database that still has connections on it,
-   * which is deliberate: freeing it then would leave them pointing at memory
-   * that is gone.
+   * The C library refuses to close a database while a statement or transaction
+   * made on it is still alive, and throws `Status.InvalidState`. The database
+   * then stays open and usable, and so do its connections: they are freed only
+   * when nothing else is alive, so a refused close takes nothing away. Free the
+   * statement or transaction and call this again.
    */
   close(): void {
     if (!this.#handle) return;
-    for (const connection of this.#connections) connection.close();
-    this.#connections.length = 0;
+    assertIdle(this);
+    if (children.get(this)?.size === 0) this.#releaseConnections();
     const error: [unknown] = [null];
-    const status = calls().close(this.#handle, error) as number;
+    check(calls().close(this.#handle, error) as number, error);
     this.#handle = undefined;
-    check(status, error);
+  }
+
+  /** Frees the handle of every connection made on this database. */
+  #releaseConnections(): void {
+    for (const connection of this.#connections) connection[releaseHandle]();
+    this.#connections.length = 0;
   }
 
   [Symbol.dispose](): void {

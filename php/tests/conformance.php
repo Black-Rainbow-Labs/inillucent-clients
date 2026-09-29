@@ -10,7 +10,8 @@ declare(strict_types=1);
 // can actually be followed.
 //
 // Run it with `php tests/conformance.php`. It exits 0 when every case passed and
-// 1 otherwise, so it can be a step in something larger.
+// 1 otherwise, so it can be a step in something larger. Set INILLUCENT_SUITE to
+// the path of another copy of the suite to run that one instead.
 
 require __DIR__ . '/../autoload.php';
 
@@ -37,7 +38,14 @@ function value_of(array $described): mixed
         return null;
     }
     if (array_key_exists('int', $described)) {
-        return (int) $described['int'];
+        // The suite is decoded with JSON_BIGINT_AS_STRING, so an integer that
+        // fits in 64 bits arrives as an exact int and one that does not arrives
+        // as a string. Casting either through a float would lose the low digits,
+        // which is the loss integers_at_the_edges_of_i64 exists to catch.
+        if (!is_int($described['int'])) {
+            throw new InvalidArgumentException(json_encode($described) . ' is not a 64 bit integer');
+        }
+        return $described['int'];
     }
     if (array_key_exists('real', $described)) {
         return (float) $described['real'];
@@ -350,17 +358,62 @@ function check_encryption(): array
     return $wrong;
 }
 
-$suitePath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'conformance'
-    . DIRECTORY_SEPARATOR . 'suite.json';
-$suite = json_decode((string) file_get_contents($suitePath), true, 512, JSON_THROW_ON_ERROR);
+/**
+ * The capabilities this runner has, out of the suite's `capabilities` list.
+ *
+ * It holds one real connection for a whole case, so a transaction, a savepoint
+ * or a temporary table lasts from one step to the next.
+ */
+const HAS = ['session'];
+
+/**
+ * Returns the capabilities a case needs that this runner does not have. An
+ * empty list means the case runs.
+ *
+ * @param array<string, mixed> $theCase one entry from the suite's cases
+ * @return string[]
+ */
+function lacking(array $theCase): array
+{
+    return array_values(array_diff($theCase['needs'] ?? [], HAS));
+}
+
+/**
+ * Returns the path of the shared conformance suite, or the file named by
+ * INILLUCENT_SUITE when that is set, so a changed copy can be run without
+ * touching the real one.
+ */
+function suite_path(): string
+{
+    $chosen = getenv('INILLUCENT_SUITE');
+    if (is_string($chosen) && $chosen !== '') {
+        return $chosen;
+    }
+    return dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'conformance' . DIRECTORY_SEPARATOR . 'suite.json';
+}
+
+$suitePath = suite_path();
+$suite = json_decode(
+    (string) file_get_contents($suitePath),
+    true,
+    512,
+    JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING
+);
 
 echo Driver::version(), '  ABI ', Driver::abiVersion(), PHP_EOL;
 echo 'driver: ', Driver::path(), PHP_EOL;
 echo 'suite:  ', $suitePath, PHP_EOL, PHP_EOL;
 
 $failures = [];
+$ran = 0;
 foreach ($suite['cases'] as $theCase) {
     $name = $theCase['name'] ?? '(unnamed)';
+    $lacks = lacking($theCase);
+    if ($lacks !== []) {
+        echo '  skip  ', $name, ' (this runner lacks ', implode(', ', $lacks), ')', PHP_EOL;
+        continue;
+    }
+    $ran++;
     $wrong = run_case($theCase);
     echo '  ', $wrong === [] ? 'ok  ' : 'FAIL', '  ', $name, PHP_EOL;
     foreach ($wrong as $problem) {
@@ -378,5 +431,5 @@ foreach ($encryption as $problem) {
 }
 $failures = array_merge($failures, $encryption);
 
-echo PHP_EOL, count($suite['cases']), ' cases, ', count($failures), ' failures', PHP_EOL;
+echo PHP_EOL, $ran, ' of ', count($suite['cases']), ' cases, ', count($failures), ' failures', PHP_EOL;
 exit($failures === [] ? 0 : 1);

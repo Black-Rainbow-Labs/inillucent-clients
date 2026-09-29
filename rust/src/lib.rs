@@ -52,7 +52,7 @@ mod value;
 
 pub use capability::{abi_version, capabilities, driver_path, supports, version, Capability, Support};
 pub use database::{
-    Connection, Database, OpenOptions, Statement, Transaction, OPEN_CREATE, OPEN_DIAGNOSTICS,
+    CancelHandle, Connection, Database, OpenOptions, Statement, Transaction, OPEN_CREATE, OPEN_DIAGNOSTICS,
     OPEN_READONLY,
 };
 pub use error::{Error, LoadError, Result, Status};

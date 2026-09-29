@@ -32,15 +32,31 @@ function engineRoots(requested) {
 }
 
 /**
+ * Returns the cargo target folders to look in: CARGO_TARGET_DIR when it is set,
+ * then each engine checkout's own target folder.
+ *
+ * A build made with CARGO_TARGET_DIR does not write to the checkout's target
+ * folder, so without the first entry this script would copy an older library
+ * from there and report success.
+ *
+ * @param roots - engine checkout paths to search
+ */
+function targetFolders(roots) {
+  const folders = roots.map((root) => join(root, 'target'));
+  if (process.env.CARGO_TARGET_DIR) folders.unshift(resolve(process.env.CARGO_TARGET_DIR));
+  return folders;
+}
+
+/**
  * Finds the newest built library under the given engine checkouts.
  * @param roots - engine checkout paths to search
  */
 function findBuilt(roots) {
   const found = [];
-  for (const root of roots) {
+  for (const folder of targetFolders(roots)) {
     for (const profile of ['release', 'debug']) {
       for (const name of libraryNames()) {
-        const candidate = join(root, 'target', profile, name);
+        const candidate = join(folder, profile, name);
         if (existsSync(candidate)) found.push({ candidate, at: statSync(candidate).mtimeMs });
       }
     }

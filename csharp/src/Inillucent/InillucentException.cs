@@ -151,6 +151,14 @@ public class InillucentException : Exception
     }
 
     /// <summary>
+    /// Builds the Status.InvalidState error for a call on a handle this library
+    /// has already closed.
+    /// </summary>
+    /// <param name="what">the kind of handle, such as "connection"</param>
+    internal static InillucentException Closed(string what) =>
+        new(Status.InvalidState, $"the {what} is closed", null, null, -1);
+
+    /// <summary>
     /// Throws when a call failed, using the error it produced.
     ///
     /// A non zero status with no error still throws: a call that failed and said

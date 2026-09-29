@@ -233,12 +233,21 @@ because ADO.NET has nowhere to put them.
 ## Running the tests
 
 ```sh
-cd csharp/test/Inillucent.Conformance && dotnet run
-cd csharp/examples/Quickstart && dotnet run
+dotnet run --project csharp/test/Inillucent.Conformance
+dotnet run --project csharp/test/Inillucent.Integration
+dotnet run --project csharp/examples/Quickstart
 ```
 
-Set `INILLUCENT_REPOSITORY` to the repository root when running from somewhere else, so the runner
-can find the suite and the shared library.
+The conformance runner runs [`conformance/suite.json`](../conformance/suite.json), the same file
+the engine's own Rust driver runs. Set `INILLUCENT_SUITE` to another copy of the suite to run that
+one instead.
 
-It runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust
-driver runs.
+The integration runner runs every scenario in
+[`conformance/integration.md`](../conformance/integration.md): opening, closing and reopening a
+file, a transaction, a prepared statement run many times, a backup, a cancel from another thread,
+and a second process writing the same file. Each scenario gets its own database in a new temporary
+folder, and the folder is deleted when the scenario ends.
+
+Inside this repository the client finds `native/` by looking in the folders above the build output
+for `native/inillucent_driver.h`. Set `INILLUCENT_REPOSITORY` to the repository root when the build
+output is somewhere else. Each runner exits with a non zero code when anything fails.

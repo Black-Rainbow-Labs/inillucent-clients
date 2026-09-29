@@ -22,9 +22,29 @@ import (
 // suiteCase is one entry from the shared conformance suite.
 type suiteCase struct {
 	Name       string            `json:"name"`
+	Group      string            `json:"group"`
+	Needs      []string          `json:"needs"`
 	Connection string            `json:"connection"`
 	Setup      []string          `json:"setup"`
 	Steps      []json.RawMessage `json:"steps"`
+}
+
+// runnerCapabilities are the capabilities this runner has, as suite.json names
+// them. Every Conn holds one real session across a case's steps, so a
+// transaction, a savepoint or a temporary table survives from one step to the
+// next.
+var runnerCapabilities = map[string]bool{"session": true}
+
+// runnable reports whether this runner has every capability a case needs.
+//
+// @param theCase - the case to check
+func runnable(theCase suiteCase) bool {
+	for _, needed := range theCase.Needs {
+		if !runnerCapabilities[needed] {
+			return false
+		}
+	}
+	return true
 }
 
 // suiteFile is the shared conformance suite.
@@ -311,10 +331,23 @@ func runCase(t *testing.T, theCase suiteCase) []string {
 	return wrong
 }
 
+// suitePath returns the suite file to run: INILLUCENT_SUITE when it is set, and
+// conformance/suite.json in this repository otherwise.
+func suitePath() string {
+	if named := os.Getenv("INILLUCENT_SUITE"); named != "" {
+		return named
+	}
+	return filepath.Join("..", "conformance", "suite.json")
+}
+
 // loadSuite reads the shared conformance suite.
+//
+// Every integer in a value object is decoded by json.Unmarshal straight from
+// its digits into an int64, never through a float64, so 9223372036854775807
+// and 9223372036854775806 stay different numbers.
 func loadSuite(t *testing.T) suiteFile {
 	t.Helper()
-	path := filepath.Join("..", "conformance", "suite.json")
+	path := suitePath()
 	text, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("cannot read %s: %v", path, err)
@@ -326,14 +359,24 @@ func loadSuite(t *testing.T) suiteFile {
 	return suite
 }
 
+// TestConformanceSuite runs every case in the suite that this runner has the
+// capabilities for, and prints how many of them it ran.
 func TestConformanceSuite(t *testing.T) {
-	for _, theCase := range loadSuite(t).Cases {
+	cases := loadSuite(t).Cases
+	ran := 0
+	for _, theCase := range cases {
+		if !runnable(theCase) {
+			fmt.Printf("skipping %s: it needs %v\n", theCase.Name, theCase.Needs)
+			continue
+		}
+		ran++
 		t.Run(theCase.Name, func(t *testing.T) {
 			for _, problem := range runCase(t, theCase) {
 				t.Error(problem)
 			}
 		})
 	}
+	fmt.Printf("conformance: %d of %d cases from %s\n", ran, len(cases), suitePath())
 }
 
 func TestCapabilityTableCanBeRead(t *testing.T) {

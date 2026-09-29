@@ -76,10 +76,13 @@ public static class Driver
     private static bool _abiChecked;
 
     /// <summary>
-    /// Refuses a major ABI mismatch by name, before anything else is called.
+    /// Refuses a major ABI mismatch, or a library older than the oldest ABI this
+    /// package calls, by name, before anything else is called.
     ///
     /// Calling a function whose signature has moved fails in a way nobody can
-    /// read, which is the whole reason the version exists.
+    /// read, which is the whole reason the version exists. A library older than
+    /// 1.1.0 has no inillucent_open_with_key, and without this check the first
+    /// open with a key failed with EntryPointNotFoundException.
     /// </summary>
     internal static void CheckAbi()
     {
@@ -97,6 +100,13 @@ public static class Driver
                 + $"{reported / 1000 % 1000}.{reported % 1000}, and this package was written for "
                 + $"ABI {NativeMethods.AbiMajor}.x. A major bump moves a signature, so calling it "
                 + "would fail in a way nobody can read. Install a matching driver.");
+        }
+        if (reported < NativeMethods.AbiMinimum)
+        {
+            throw new DriverLoadException(
+                $"{NativeMethods.ResolvedPath} reports ABI {major}.{reported / 1000 % 1000}."
+                + $"{reported % 1000}, and this package needs ABI 1.1.0 or later, the first with "
+                + "inillucent_open_with_key. Install a newer driver.");
         }
         _abiChecked = true;
     }

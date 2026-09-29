@@ -52,35 +52,55 @@ public final class Statement implements AutoCloseable {
     }
 
     /**
-     * Binds one value, choosing the call by the Java type.
+     * Binds one value, and throws when the engine refuses it.
+     *
+     * The engine refuses an index past the statement's last parameter with
+     * Status.INVALID_STATE, so binding more values than the SQL has placeholders
+     * throws here rather than dropping the extra value without a word.
      *
      * @param arena - where a copy of the value lives until the call returns
      * @param index - the one based parameter position
      * @param value - what to bind
      */
     private void bind(Arena arena, int index, Object value) {
+        int status = bindValue(arena, index, value);
+        if (status != 0) {
+            throw new InillucentException(Status.fromCode(status), "binding a value to ?" + index
+                + " was refused. The statement may have fewer parameters than the values given,"
+                + " or it may be closed", null, null, -1);
+        }
+    }
+
+    /**
+     * Makes the C bind call that matches the Java type, and returns its status.
+     *
+     * @param arena - where a copy of the value lives until the call returns
+     * @param index - the one based parameter position
+     * @param value - what to bind
+     */
+    private int bindValue(Arena arena, int index, Object value) {
         if (value == null) {
-            driver.callInt("inillucent_bind_null", handle, index);
+            return driver.callInt("inillucent_bind_null", handle, index);
         } else if (value instanceof Boolean yes) {
-            driver.callInt("inillucent_bind_int", handle, index, yes ? 1L : 0L);
+            return driver.callInt("inillucent_bind_int", handle, index, yes ? 1L : 0L);
         } else if (value instanceof Byte || value instanceof Short
                    || value instanceof Integer || value instanceof Long) {
-            driver.callInt("inillucent_bind_int", handle, index, ((Number) value).longValue());
+            return driver.callInt("inillucent_bind_int", handle, index, ((Number) value).longValue());
         } else if (value instanceof Float || value instanceof Double) {
-            driver.callInt("inillucent_bind_real", handle, index, ((Number) value).doubleValue());
+            return driver.callInt("inillucent_bind_real", handle, index,
+                ((Number) value).doubleValue());
         } else if (value instanceof String text) {
             byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
-            driver.callInt("inillucent_bind_text",
+            return driver.callInt("inillucent_bind_text",
                 handle, index, copy(arena, bytes), (long) bytes.length);
         } else if (value instanceof byte[] bytes) {
-            driver.callInt("inillucent_bind_blob",
+            return driver.callInt("inillucent_bind_blob",
                 handle, index, copy(arena, bytes), (long) bytes.length);
-        } else {
-            throw new IllegalArgumentException(
-                "cannot bind a " + value.getClass().getName() + ". The engine stores NULL,"
-                    + " integers, reals, text and bytes, and converting anything else would be"
-                    + " this library deciding what your value means.");
         }
+        throw new IllegalArgumentException(
+            "cannot bind a " + value.getClass().getName() + ". The engine stores NULL,"
+                + " integers, reals, text and bytes, and converting anything else would be"
+                + " this library deciding what your value means.");
     }
 
     /**
@@ -108,13 +128,18 @@ public final class Statement implements AutoCloseable {
         return connection;
     }
 
-    /** Frees the statement. Closing twice is safe. */
+    /**
+     * Frees the statement. Closing twice is safe.
+     *
+     * The handle becomes the C null pointer rather than Java null, so executing
+     * a closed statement fails with Status.INVALID_STATE from the engine.
+     */
     @Override
     public void close() {
-        if (handle == null) {
+        if (handle.equals(MemorySegment.NULL)) {
             return;
         }
         driver.callVoid("inillucent_stmt_free", handle);
-        handle = null;
+        handle = MemorySegment.NULL;
     }
 }

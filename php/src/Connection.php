@@ -49,7 +49,7 @@ final class Connection
         $out = $ffi->new('inillucent_rows*[1]');
         $error = $ffi->new('inillucent_error*[1]');
         InillucentException::check(
-            $ffi->inillucent_execute($this->handle, $sql, self::capped($limit), $out, $error),
+            $ffi->inillucent_execute($this->live(), $sql, self::capped($limit), $out, $error),
             $error
         );
         return Rows::take($out[0]);
@@ -89,7 +89,7 @@ final class Connection
         $ffi = Driver::ffi();
         $error = $ffi->new('inillucent_error*[1]');
         InillucentException::check(
-            $ffi->inillucent_execute_batch($this->handle, $sql, $error),
+            $ffi->inillucent_execute_batch($this->live(), $sql, $error),
             $error
         );
     }
@@ -105,7 +105,7 @@ final class Connection
         $out = $ffi->new('inillucent_stmt*[1]');
         $error = $ffi->new('inillucent_error*[1]');
         InillucentException::check(
-            $ffi->inillucent_prepare($this->handle, $sql, $out, $error),
+            $ffi->inillucent_prepare($this->live(), $sql, $out, $error),
             $error
         );
         return new Statement($this, $out[0]);
@@ -118,7 +118,7 @@ final class Connection
         $out = $ffi->new('inillucent_txn*[1]');
         $error = $ffi->new('inillucent_error*[1]');
         InillucentException::check(
-            $ffi->inillucent_txn_begin($this->handle, $out, $error),
+            $ffi->inillucent_txn_begin($this->live(), $out, $error),
             $error
         );
         return new Transaction($out[0]);
@@ -127,19 +127,19 @@ final class Connection
     /** Returns the rowid the most recent insert on this connection produced. */
     public function lastInsertRowid(): int
     {
-        return Driver::ffi()->inillucent_last_insert_rowid($this->handle);
+        return Driver::ffi()->inillucent_last_insert_rowid($this->live());
     }
 
     /** Returns how many rows every statement on this connection has changed. */
     public function totalChanges(): int
     {
-        return Driver::ffi()->inillucent_total_changes($this->handle);
+        return Driver::ffi()->inillucent_total_changes($this->live());
     }
 
     /** Returns whether a transaction is open on this connection. */
     public function inTransaction(): bool
     {
-        return Driver::ffi()->inillucent_in_transaction($this->handle) !== 0;
+        return Driver::ffi()->inillucent_in_transaction($this->live()) !== 0;
     }
 
     /**
@@ -149,7 +149,7 @@ final class Connection
      */
     public function schemaCookie(): int
     {
-        return Driver::ffi()->inillucent_schema_cookie($this->handle);
+        return Driver::ffi()->inillucent_schema_cookie($this->live());
     }
 
     /**
@@ -166,7 +166,7 @@ final class Connection
     {
         $ffi = Driver::ffi();
         $error = $ffi->new('inillucent_error*[1]');
-        InillucentException::check($ffi->inillucent_cancel($this->handle, $error), $error);
+        InillucentException::check($ffi->inillucent_cancel($this->live(), $error), $error);
     }
 
     /** Returns the database this connection is on. */
@@ -193,5 +193,18 @@ final class Connection
         }
         Driver::ffi()->inillucent_conn_free($this->handle);
         $this->handle = null;
+    }
+
+    /**
+     * Returns the C handle, or throws Status::InvalidState once the connection is
+     * closed, so a call after close() is an error and never a null pointer
+     * handed to the engine.
+     */
+    private function live(): mixed
+    {
+        if ($this->handle === null) {
+            throw InillucentException::closed('connection');
+        }
+        return $this->handle;
     }
 }

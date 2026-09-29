@@ -55,11 +55,11 @@ public final class Transaction implements AutoCloseable {
 
     /** Commits the transaction. The handle is spent either way. */
     public void commit() {
-        if (handle == null) {
+        if (handle.equals(MemorySegment.NULL)) {
             return;
         }
         MemorySegment committing = handle;
-        handle = null;
+        handle = MemorySegment.NULL;
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment error = arena.allocate(ValueLayout.ADDRESS);
             int status = driver.callInt("inillucent_txn_commit", committing, error);
@@ -71,13 +71,18 @@ public final class Transaction implements AutoCloseable {
         }
     }
 
-    /** Rolls the transaction back and frees it. Rolling back twice is safe. */
+    /**
+     * Rolls the transaction back and frees it. Rolling back twice is safe.
+     *
+     * The handle becomes the C null pointer rather than Java null, so executing
+     * in a finished transaction fails with Status.INVALID_STATE from the engine.
+     */
     public void rollback() {
-        if (handle == null) {
+        if (handle.equals(MemorySegment.NULL)) {
             return;
         }
         driver.callVoid("inillucent_txn_rollback", handle);
-        handle = null;
+        handle = MemorySegment.NULL;
     }
 
     /** Rolls back when the transaction was not committed. */

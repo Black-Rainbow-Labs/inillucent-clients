@@ -238,25 +238,35 @@ can compile against the same ABI.
 
 ## Tests
 
-Every client is graded by [`conformance/suite.json`](conformance/suite.json), the same file the
-engine's own Rust driver runs. A client passes when it agrees with the engine.
+Every client runs two sets of tests against a real database file.
+
+[`conformance/suite.json`](conformance/suite.json) is the same file the engine's own Rust driver
+runs: 33 cases covering values at their edges, error statuses, transactions that fail part way,
+quoted identifiers, FTS5 and hybrid search. A client passes when it agrees with the engine. Set
+`INILLUCENT_SUITE` to a path to run a different copy of it.
+
+[`conformance/integration.md`](conformance/integration.md) lists the scenarios a statement cannot
+express: reopening a file, read only opens, a second process writing the same file, prepared
+statements, transactions, closing in the wrong order, backups, cancel from another thread and
+encrypted files. Every client has a test for each scenario, with the same name.
 
 ```
 $ node scripts/test-all.mjs
 
-  ok    python      ctypes
-  ok    typescript  koffi
-  ok    javascript  the same package, both module systems
-  ok    rust        libloading
-  ok    go          purego
-  ok    java        the Foreign Function and Memory API
-  ok    csharp      DllImport
-  ok    php         the FFI extension
+  ok    python      ctypes                                   33 of 33 cases
+  ok    typescript  koffi                                    33 of 33 cases
+  ok    javascript  the same package, both module systems    33 of 33 cases
+  ok    rust        libloading                               33 of 33 cases
+  ok    go          purego                                   33 of 33 cases
+  ok    java        the Foreign Function and Memory API      33 of 33 cases
+  ok    csharp      DllImport                                33 of 33 cases
+  ok    php         the FFI extension                        33 of 33 cases
 
 8 of 8 clients pass
 ```
 
-A language with no toolchain on the machine is reported as skipped.
+A language with no toolchain on the machine is reported as skipped. Each language's README says
+how to run its own tests.
 
 The [`examples/`](examples/) folder describes the person program each README shows, and each client
 has its own copy that runs.

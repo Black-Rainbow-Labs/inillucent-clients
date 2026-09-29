@@ -42,7 +42,7 @@ final class Transaction
         $changed = $ffi->new('unsigned long long[1]');
         $error = $ffi->new('inillucent_error*[1]');
         InillucentException::check(
-            $ffi->inillucent_txn_execute($this->handle, $sql, $changed, $error),
+            $ffi->inillucent_txn_execute($this->live(), $sql, $changed, $error),
             $error
         );
         $this->affected[] = $changed[0];
@@ -81,5 +81,18 @@ final class Transaction
     public function __destruct()
     {
         $this->rollback();
+    }
+
+    /**
+     * Returns the C handle, or throws Status::InvalidState once the transaction is
+     * closed, so a call after close() is an error and never a null pointer
+     * handed to the engine.
+     */
+    private function live(): mixed
+    {
+        if ($this->handle === null) {
+            throw InillucentException::closed('transaction');
+        }
+        return $this->handle;
     }
 }

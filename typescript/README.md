@@ -173,6 +173,10 @@ try {
 }
 ```
 
+Each `execute` clears the values bound by the last one, so a parameter given no value is `NULL`.
+Giving more values than the statement has placeholders throws an `InillucentError` with status
+`Status.InvalidState` rather than dropping the extra value.
+
 ## Transactions
 
 A transaction is an object you hold open. Run the statements, look at how many rows each one
@@ -187,6 +191,12 @@ else txn.rollback();
 
 A failed statement rolls the whole transaction back before it throws, so a caller that stops at the
 first error has already undone everything. A transaction that is never committed rolls back.
+
+After a commit, a rollback or a failed statement the transaction has ended. Running a statement on
+it or committing it again throws an `InillucentError` with status `Status.InvalidState`, so a write
+you believe was committed cannot have been dropped without an error. Rolling back an ended
+transaction does nothing, and `Symbol.dispose` rolls back, so `using txn = db.transaction()` undoes
+everything that was not committed when the block ends.
 
 ## When the engine refuses
 
@@ -247,6 +257,10 @@ database.integrityCheck();      // walk every tree and throw on the first thing 
 database.backupTo('copy.rdb');  // copies, then opens and checks the copy
 ```
 
+`close()` refuses with `Status.InvalidState` while a prepared statement or a transaction made on
+the database is still open. The database and its connections stay open and usable. Close the
+statement or end the transaction, then call `close()` again. Closing a second time does nothing.
+
 ## Threads
 
 One file is one buffer pool and the engine is single threaded. Keep a `Database` and everything
@@ -256,11 +270,45 @@ Every call is synchronous, which is deliberate: the engine runs a statement whol
 nothing to await and an async wrapper would add a microtask per row for no gain. Put a long query on
 a worker thread if it must not block the event loop.
 
+The one exception is a statement you may want to stop. A synchronous `execute` blocks the event
+loop, so nothing in the same thread can call `cancel()` while it runs. `executeAsync` runs the
+statement on a worker thread and returns a promise, so a timer or a Stop button can cancel it:
+
+```ts
+const running = db.executeAsync('SELECT count(*) FROM big_table');
+const stop = setTimeout(() => db.cancel(), 5000);
+try {
+  console.log((await running).scalar());
+} catch (why) {
+  if (why instanceof InillucentError && why.status === Status.Interrupted) console.log('stopped');
+  else throw why;
+} finally {
+  clearTimeout(stop);
+}
+```
+
+The statement stops at the next point the engine checks, and the connection stays usable. Until the
+promise settles, every other call on that database throws `Status.Busy`, because the engine has no
+lock inside. `Statement` has `executeAsync` too.
+
 ## Running the tests
 
 ```sh
 npm --prefix typescript test
 ```
 
-It runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust
-driver runs.
+It builds the package and runs two files against the build in `dist/`.
+[`test/conformance.test.js`](test/conformance.test.js) runs
+[`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust driver
+runs. [`test/integration.test.js`](test/integration.test.js) runs every scenario in
+[`conformance/integration.md`](../conformance/integration.md): opening, closing and reopening a
+file, a second process writing the same file, transactions, a cancel, a backup, and the errors.
+Each scenario uses a real file in a new temporary folder and deletes the folder when it ends.
+
+To run only the integration tests:
+
+```sh
+npm --prefix typescript run integration
+```
+
+`INILLUCENT_SUITE` names a different suite file for the conformance run.

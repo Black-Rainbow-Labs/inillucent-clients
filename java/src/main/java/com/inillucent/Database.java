@@ -138,23 +138,29 @@ public final class Database implements AutoCloseable {
      *
      * The C library refuses to close a database that still has connections on
      * it, which is deliberate: freeing it then would leave them pointing at
-     * memory that is gone. Closing twice is safe.
+     * memory that is gone. A connection counts as alive while a statement or
+     * transaction made on it is open, so the close is refused with
+     * Status.INVALID_STATE until those are closed too. A refused close keeps the
+     * handle, so the database stays open and usable and a later close can
+     * succeed. Closing twice is safe.
      */
     @Override
     public void close() {
-        if (handle == null) {
+        if (handle.equals(MemorySegment.NULL)) {
             return;
         }
         for (Connection connection : connections) {
             connection.close();
         }
         connections.clear();
-        MemorySegment closing = handle;
-        handle = null;
         try (Arena arena = Arena.ofConfined()) {
             MemorySegment error = arena.allocate(ValueLayout.ADDRESS);
-            Check.status(driver, driver.callInt("inillucent_close", closing, error), error);
+            Check.status(driver, driver.callInt("inillucent_close", handle, error), error);
         }
+        // Only a close the engine accepted spends the handle. Clearing it before
+        // the check lost the database for good whenever a statement was still
+        // open, because the engine had refused and nothing could close it again.
+        handle = MemorySegment.NULL;
     }
 
     /** How a database file is opened. */

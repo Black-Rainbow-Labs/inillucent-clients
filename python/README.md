@@ -231,4 +231,14 @@ PYTHONPATH=python/src python python/tests/conformance.py
 ```
 
 It runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust
-driver runs.
+driver runs, and prints how many of its cases ran. Set `INILLUCENT_SUITE` to a path to run another
+suite file instead.
+
+```sh
+PYTHONPATH=python/src python -m pytest python/tests -q
+```
+
+It runs every scenario in [`conformance/integration.md`](../conformance/integration.md): opening,
+closing and reopening a file, transactions, prepared statements, a backup, a cancel from another
+thread and a second process writing the same file. Each test uses a real database in a new
+temporary folder and deletes the folder when it ends.

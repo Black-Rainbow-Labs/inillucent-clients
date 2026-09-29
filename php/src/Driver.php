@@ -16,8 +16,15 @@ use FFI;
  */
 final class Driver
 {
-    /** The ABI this package was written against. Only the major has to match. */
+    /** The ABI this package was written against. The major has to match. */
     public const ABI_MAJOR = 1;
+
+    /**
+     * The oldest ABI this package can call, as major*1000000 + minor*1000 + patch.
+     * 1.1.0 is the first with inillucent_open_with_key, which Database::open
+     * calls whenever a key is given.
+     */
+    public const ABI_MINIMUM = 1001000;
 
     /** The largest limit the C ABI accepts, which is every row. */
     public const NO_LIMIT = -1;
@@ -180,10 +187,13 @@ final class Driver
     }
 
     /**
-     * Loads the library and refuses a major ABI mismatch by name.
+     * Loads the library and refuses, by name, a major ABI mismatch or a library
+     * older than the oldest ABI this package calls.
      *
      * Calling a function whose signature has moved fails in a way nobody can
-     * read, which is the whole reason the version exists.
+     * read, which is the whole reason the version exists. A library older than
+     * 1.1.0 has no inillucent_open_with_key, so without the second check the
+     * first open with a key failed inside FFI instead.
      */
     private static function load(): void
     {
@@ -208,6 +218,16 @@ final class Driver
                 intdiv($reported, 1000) % 1000,
                 $reported % 1000,
                 self::ABI_MAJOR
+            ));
+        }
+        if ($reported < self::ABI_MINIMUM) {
+            throw new DriverLoadException(sprintf(
+                '%s reports ABI %d.%d.%d, and this package needs ABI 1.1.0 or later, the first'
+                . ' with inillucent_open_with_key. Install a newer driver.',
+                $path,
+                $major,
+                intdiv($reported, 1000) % 1000,
+                $reported % 1000
             ));
         }
 

@@ -7,7 +7,7 @@
   "scripts": {
     "quickstart": "node examples/quickstart.mjs",
     "quickstart:cjs": "node examples/quickstart.cjs",
-    "test": "node --test test/commonjs.test.cjs test/esm.test.mjs"
+    "test": "node --test test/commonjs.test.cjs test/esm.test.mjs test/integration.test.cjs test/integration.test.mjs"
   },
   "dependencies": {
     "inillucent-client": "file:../typescript"

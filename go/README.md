@@ -254,4 +254,11 @@ go run ./examples/quickstart
 ```
 
 The test runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own
-Rust driver runs.
+Rust driver runs. Set `INILLUCENT_SUITE` to a path to run a different copy of the suite.
+
+`integration_test.go` runs every scenario in
+[`conformance/integration.md`](../conformance/integration.md): opening, closing and reopening a file,
+transactions, prepared statements, backups, a cancel from another goroutine, and a second process
+writing the same file. Each test uses a real database in its own temporary folder. They run with the
+same `go test` command. `go test -v` prints one line per test, and `go test -cover` measures line
+coverage.

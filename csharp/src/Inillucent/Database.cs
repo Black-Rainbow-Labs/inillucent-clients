@@ -91,7 +91,7 @@ public sealed class Database : IDisposable
     /// <summary>Opens a connection, and with it a session.</summary>
     public Connection Connect()
     {
-        var status = NativeMethods.inillucent_connect(_handle, out var handle, out var error);
+        var status = NativeMethods.inillucent_connect(Live(), out var handle, out var error);
         InillucentException.Check(status, error);
         var connection = new Connection(this, handle);
         _connections.Add(connection);
@@ -100,20 +100,20 @@ public sealed class Database : IDisposable
 
     /// <summary>The file this database is in.</summary>
     public string Path =>
-        NativeMethods.ReadString(NativeMethods.inillucent_path(_handle)) ?? "";
+        NativeMethods.ReadString(NativeMethods.inillucent_path(Live())) ?? "";
 
     /// <summary>Makes everything written so far durable in the file.</summary>
     public void Checkpoint()
     {
         InillucentException.Check(
-            NativeMethods.inillucent_checkpoint(_handle, out var error), error);
+            NativeMethods.inillucent_checkpoint(Live(), out var error), error);
     }
 
     /// <summary>Walks every tree and throws on the first thing that is wrong.</summary>
     public void IntegrityCheck()
     {
         InillucentException.Check(
-            NativeMethods.inillucent_integrity_check(_handle, out var error), error);
+            NativeMethods.inillucent_integrity_check(Live(), out var error), error);
     }
 
     /// <summary>
@@ -125,15 +125,26 @@ public sealed class Database : IDisposable
     public void BackupTo(string path)
     {
         InillucentException.Check(
-            NativeMethods.inillucent_backup_to(_handle, path, out var error), error);
+            NativeMethods.inillucent_backup_to(Live(), path, out var error), error);
     }
+
+    /// <summary>
+    /// Returns the C handle, or throws Status.InvalidState once the database is
+    /// closed, so a call after Dispose is an error and never a null pointer
+    /// handed to the engine.
+    /// </summary>
+    private IntPtr Live() =>
+        _handle != IntPtr.Zero ? _handle : throw InillucentException.Closed("database");
 
     /// <summary>
     /// Checkpoints and closes, closing every connection first.
     ///
     /// The C library refuses to close a database that still has connections on
     /// it, which is deliberate: freeing it then would leave them pointing at
-    /// memory that is gone. Disposing twice is safe.
+    /// memory that is gone. A statement or transaction that is still open keeps
+    /// its connection alive, so the close then fails with Status.InvalidState and
+    /// the database stays open and usable. Dispose the statement or transaction
+    /// and dispose the database again. Disposing twice is safe.
     /// </summary>
     public void Dispose()
     {
@@ -146,10 +157,12 @@ public sealed class Database : IDisposable
             connection.Dispose();
         }
         _connections.Clear();
-        var closing = _handle;
-        _handle = IntPtr.Zero;
+        // The handle is only forgotten once the engine has let it go. Clearing it
+        // first would lose a database the engine refused to close, and nothing
+        // could ever close it after that.
         InillucentException.Check(
-            NativeMethods.inillucent_close(closing, out var error), error);
+            NativeMethods.inillucent_close(_handle, out var error), error);
+        _handle = IntPtr.Zero;
     }
 }
 
@@ -192,7 +205,7 @@ public sealed class Connection : IDisposable
             return statement.Execute(parameters, limit);
         }
         var status = NativeMethods.inillucent_execute(
-            _handle, sql, Capped(limit), out var rows, out var error);
+            Live(), sql, Capped(limit), out var rows, out var error);
         InillucentException.Check(status, error);
         return Rows.Take(rows);
     }
@@ -221,7 +234,7 @@ public sealed class Connection : IDisposable
     public void ExecuteBatch(string sql)
     {
         InillucentException.Check(
-            NativeMethods.inillucent_execute_batch(_handle, sql, out var error), error);
+            NativeMethods.inillucent_execute_batch(Live(), sql, out var error), error);
     }
 
     /// <summary>
@@ -230,7 +243,7 @@ public sealed class Connection : IDisposable
     /// <param name="sql">the statement to compile</param>
     public Statement Prepare(string sql)
     {
-        var status = NativeMethods.inillucent_prepare(_handle, sql, out var handle, out var error);
+        var status = NativeMethods.inillucent_prepare(Live(), sql, out var handle, out var error);
         InillucentException.Check(status, error);
         return new Statement(this, handle);
     }
@@ -238,25 +251,25 @@ public sealed class Connection : IDisposable
     /// <summary>Opens a transaction.</summary>
     public Transaction Begin()
     {
-        var status = NativeMethods.inillucent_txn_begin(_handle, out var handle, out var error);
+        var status = NativeMethods.inillucent_txn_begin(Live(), out var handle, out var error);
         InillucentException.Check(status, error);
         return new Transaction(handle);
     }
 
     /// <summary>The rowid the most recent insert on this connection produced.</summary>
-    public long LastInsertRowid => NativeMethods.inillucent_last_insert_rowid(_handle);
+    public long LastInsertRowid => NativeMethods.inillucent_last_insert_rowid(Live());
 
     /// <summary>How many rows every statement on this connection has changed.</summary>
-    public long TotalChanges => NativeMethods.inillucent_total_changes(_handle);
+    public long TotalChanges => NativeMethods.inillucent_total_changes(Live());
 
     /// <summary>Whether a transaction is open on this connection.</summary>
-    public bool InTransaction => NativeMethods.inillucent_in_transaction(_handle) != 0;
+    public bool InTransaction => NativeMethods.inillucent_in_transaction(Live()) != 0;
 
     /// <summary>
     /// The schema's generation, which changes when the schema does. Compare it to
     /// know whether a cached table description is stale.
     /// </summary>
-    public ulong SchemaCookie => NativeMethods.inillucent_schema_cookie(_handle);
+    public ulong SchemaCookie => NativeMethods.inillucent_schema_cookie(Live());
 
     /// <summary>
     /// Asks a running statement to stop.
@@ -271,8 +284,16 @@ public sealed class Connection : IDisposable
     public void Cancel()
     {
         InillucentException.Check(
-            NativeMethods.inillucent_cancel(_handle, out var error), error);
+            NativeMethods.inillucent_cancel(Live(), out var error), error);
     }
+
+    /// <summary>
+    /// Returns the C handle, or throws Status.InvalidState once the connection
+    /// is closed, so a call after Dispose is an error and never a null pointer
+    /// handed to the engine.
+    /// </summary>
+    private IntPtr Live() =>
+        _handle != IntPtr.Zero ? _handle : throw InillucentException.Closed("connection");
 
     /// <summary>
     /// Returns the C limit for a caller's limit, where null is every row.
@@ -315,7 +336,7 @@ public sealed class Statement : IDisposable
     /// <param name="limit">rows to hand back, or null for every row</param>
     public Rows Execute(IReadOnlyList<object?>? parameters = null, long? limit = null)
     {
-        NativeMethods.inillucent_clear_bindings(_handle);
+        NativeMethods.inillucent_clear_bindings(Live());
         if (parameters is not null)
         {
             for (var nth = 0; nth < parameters.Count; nth++)
@@ -330,36 +351,37 @@ public sealed class Statement : IDisposable
     }
 
     /// <summary>
-    /// Binds one value, choosing the call by the .NET type.
+    /// Binds one value, choosing the call by the .NET type, and throws when the
+    /// engine refuses it, such as a position of 0.
     /// </summary>
     /// <param name="index">the one based parameter position</param>
     /// <param name="value">what to bind</param>
     public void Bind(uint index, object? value)
     {
+        var handle = Live();
+        int status;
         switch (value)
         {
             case null:
-                NativeMethods.inillucent_bind_null(_handle, index);
+                status = NativeMethods.inillucent_bind_null(handle, index);
                 break;
             case bool yes:
-                NativeMethods.inillucent_bind_int(_handle, index, yes ? 1 : 0);
+                status = NativeMethods.inillucent_bind_int(handle, index, yes ? 1 : 0);
                 break;
             case sbyte or byte or short or ushort or int or uint or long:
-                NativeMethods.inillucent_bind_int(
-                    _handle, index, Convert.ToInt64(value));
+                status = NativeMethods.inillucent_bind_int(handle, index, Convert.ToInt64(value));
                 break;
             case float or double or decimal:
-                NativeMethods.inillucent_bind_real(
-                    _handle, index, Convert.ToDouble(value));
+                status = NativeMethods.inillucent_bind_real(handle, index, Convert.ToDouble(value));
                 break;
             case string text:
                 var encoded = Encoding.UTF8.GetBytes(text);
-                NativeMethods.inillucent_bind_text(
-                    _handle, index, NeverEmpty(encoded), (nuint)encoded.Length);
+                status = NativeMethods.inillucent_bind_text(
+                    handle, index, NeverEmpty(encoded), (nuint)encoded.Length);
                 break;
             case byte[] bytes:
-                NativeMethods.inillucent_bind_blob(
-                    _handle, index, NeverEmpty(bytes), (nuint)bytes.Length);
+                status = NativeMethods.inillucent_bind_blob(
+                    handle, index, NeverEmpty(bytes), (nuint)bytes.Length);
                 break;
             default:
                 throw new ArgumentException(
@@ -367,6 +389,9 @@ public sealed class Statement : IDisposable
                     + "reals, text and bytes, and converting anything else would be this library "
                     + "deciding what your value means.", nameof(value));
         }
+        // The bind calls return a status and no error handle. It was ignored, so a
+        // refused bind left the parameter NULL and the statement ran anyway.
+        InillucentException.Check(status, IntPtr.Zero);
     }
 
     /// <summary>
@@ -379,6 +404,14 @@ public sealed class Statement : IDisposable
     /// </summary>
     /// <param name="bytes">the bytes being bound</param>
     private static byte[] NeverEmpty(byte[] bytes) => bytes.Length == 0 ? new byte[1] : bytes;
+
+    /// <summary>
+    /// Returns the C handle, or throws Status.InvalidState once the statement is
+    /// closed, so a call after Dispose is an error and never a null pointer
+    /// handed to the engine.
+    /// </summary>
+    private IntPtr Live() =>
+        _handle != IntPtr.Zero ? _handle : throw InillucentException.Closed("statement");
 
     /// <summary>Frees the statement. Disposing twice is safe.</summary>
     public void Dispose()
@@ -422,7 +455,7 @@ public sealed class Transaction : IDisposable
     public ulong Execute(string sql)
     {
         var status = NativeMethods.inillucent_txn_execute(
-            _handle, sql, out var changed, out var error);
+            _handle != IntPtr.Zero ? _handle : throw InillucentException.Closed("transaction"), sql, out var changed, out var error);
         InillucentException.Check(status, error);
         _affected.Add(changed);
         return changed;

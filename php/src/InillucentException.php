@@ -70,6 +70,17 @@ class InillucentException extends RuntimeException
     }
 
     /**
+     * Builds the Status::InvalidState error for a call on a handle this library
+     * has already closed.
+     *
+     * @param string $what the kind of handle, such as "connection"
+     */
+    public static function closed(string $what): self
+    {
+        return new self(Status::InvalidState, "the $what is closed");
+    }
+
+    /**
      * Throws when a call failed, using the error it produced.
      *
      * A non zero status with no error still throws: a call that failed and said

@@ -15,7 +15,56 @@ import { fileURLToPath } from 'node:url';
 import { Database, InillucentError, UnsupportedError, Status, Support, capabilities, supports } from '../dist/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SUITE = resolve(here, '..', '..', 'conformance', 'suite.json');
+// INILLUCENT_SUITE names a different suite file. It exists so a copy with one
+// expected value changed can prove the runner notices, without touching the
+// real suite that every other client reads.
+const SUITE = process.env.INILLUCENT_SUITE ?? resolve(here, '..', '..', 'conformance', 'suite.json');
+
+// What this runner can do, out of the suite's `capabilities`. It holds one real
+// connection across a case, and that connection is one session, so a case that
+// asks for `"connection": "per_call"` is satisfied without doing anything: the
+// session is already continued from one statement to the next.
+const CAPABILITIES = new Set(['session']);
+
+/**
+ * Keeps every integer in the suite exact.
+ *
+ * JSON.parse reads a number through a double, so 9223372036854775807 would
+ * arrive as 9223372036854775808 and a check against it would pass for the wrong
+ * value. The reviver reads the number's own source text, and an integer outside
+ * the range a double holds exactly becomes a bigint, which is what the client
+ * returns for it.
+ *
+ * @param key - the property being read
+ * @param value - what JSON.parse made of it
+ * @param context - carries the source text of a primitive value
+ */
+function exactIntegers(key, value, context) {
+  if (typeof value !== 'number' || Number.isSafeInteger(value)) return value;
+  const source = context?.source;
+  return typeof source === 'string' && /^-?\d+$/.test(source) ? BigInt(source) : value;
+}
+
+/**
+ * Reads the suite with every integer exact, and refuses to run on a node whose
+ * JSON.parse does not hand a reviver the source text.
+ * @param path - the suite file
+ */
+function readSuite(path) {
+  const probe = JSON.parse('{"n": 9223372036854775807}', exactIntegers);
+  if (probe.n !== 9223372036854775807n) {
+    throw new Error('this node gives JSON.parse revivers no source text, so the suite cannot be read without losing 64 bit integers');
+  }
+  return JSON.parse(readFileSync(path, 'utf8'), exactIntegers);
+}
+
+/**
+ * Returns the capabilities a case needs and this runner does not have.
+ * @param theCase - one entry from the suite's cases
+ */
+function missingFor(theCase) {
+  return (theCase.needs ?? []).filter((need) => !CAPABILITIES.has(need));
+}
 
 /**
  * Reads a value out of the suite's one key object form.
@@ -54,10 +103,14 @@ function same(want, got) {
   return want === got;
 }
 
-/** Renders a value for a failure message. */
+/**
+ * Renders a value for a failure message.
+ * @param value - an expected or returned value
+ */
 function shown(value) {
   if (value === null) return 'NULL';
   if (Buffer.isBuffer(value)) return `${value.length} bytes [${[...value]}]`;
+  if (typeof value === 'bigint') return `${value}n`;
   return JSON.stringify(value);
 }
 
@@ -143,7 +196,11 @@ function checkFailure(step, failure, wrong) {
  * @param theCase - one entry from the suite's cases
  */
 function runCase(theCase) {
-  const path = join(tmpdir(), `inillucent-conformance-ts-${theCase.name}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.rdb`);
+  // A folder per case rather than a file, because the engine writes its log
+  // beside the database as `.rdb-wal.NNNN` files, and deleting only the .rdb
+  // would leave them behind in the temporary directory.
+  const folder = mkdtempSync(join(tmpdir(), 'inillucent-conformance-ts-'));
+  const path = join(folder, `${theCase.name}.rdb`);
   const wrong = [];
   const database = new Database(path);
   const connection = database.connect();
@@ -171,19 +228,31 @@ function runCase(theCase) {
   } finally {
     connection.close();
     database.close();
-    rmSync(path, { force: true });
+    rmSync(folder, { recursive: true, force: true });
   }
   return wrong;
 }
 
-const suite = JSON.parse(readFileSync(SUITE, 'utf8'));
+const suite = readSuite(SUITE);
+let ran = 0;
 
 for (const theCase of suite.cases) {
+  const missing = missingFor(theCase);
+  if (missing.length > 0) {
+    test(`conformance: ${theCase.name}`, { skip: `skipping: this runner lacks ${missing.join(', ')}` }, () => {});
+    continue;
+  }
+  ran += 1;
   test(`conformance: ${theCase.name}`, () => {
     const wrong = runCase(theCase);
     assert.deepEqual(wrong, [], `${theCase.name} disagreed:\n  ${wrong.join('\n  ')}`);
   });
 }
+
+console.log(`typescript conformance: ${ran} of ${suite.cases.length} cases, from ${SUITE}`);
+test(`conformance ran ${ran} of ${suite.cases.length} cases`, () => {
+  assert.equal(ran, suite.cases.length, 'this runner has every capability the suite names, so it runs every case');
+});
 
 test('the capability table can be read', () => {
   // Reading it here also proves the C strings it hands back survive being copied

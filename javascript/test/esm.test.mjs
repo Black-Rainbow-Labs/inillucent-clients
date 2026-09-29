@@ -15,8 +15,8 @@ import { createRequire } from 'node:module';
 import { connect, version, driverPath, UnsupportedError, InillucentError, Status } from 'inillucent-client';
 
 test('an ES module import gives a working database', () => {
-  const path = join(tmpdir(), `inillucent-esm-${process.pid}-${Date.now()}.rdb`);
-  rmSync(path, { force: true });
+  const folder = mkdtempSync(join(tmpdir(), 'inillucent-esm-'));
+  const path = join(folder, 'test.rdb');
   const db = connect(path);
   try {
     db.execute('CREATE TABLE note (id INTEGER PRIMARY KEY, body TEXT)');
@@ -25,15 +25,15 @@ test('an ES module import gives a working database', () => {
     assert.equal(db.scalar('SELECT COUNT(*) FROM note'), 1);
   } finally {
     db.close();
-    rmSync(path, { force: true });
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 
 test('an empty string is stored as an empty string, not as NULL', () => {
   // The C ABI reads a null value pointer as NULL, and a zero length buffer
   // reaches it as one, so this is the binding mistake most worth a test.
-  const path = join(tmpdir(), `inillucent-esm-empty-${process.pid}-${Date.now()}.rdb`);
-  rmSync(path, { force: true });
+  const folder = mkdtempSync(join(tmpdir(), 'inillucent-esm-empty-'));
+  const path = join(folder, 'test.rdb');
   const db = connect(path);
   try {
     db.execute('CREATE TABLE n (a INTEGER PRIMARY KEY, b TEXT)');
@@ -43,13 +43,13 @@ test('an empty string is stored as an empty string, not as NULL', () => {
     assert.equal(db.scalar('SELECT b FROM n WHERE a = 2'), '');
   } finally {
     db.close();
-    rmSync(path, { force: true });
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 
 test('an unsupported refusal arrives as its own error type', () => {
-  const path = join(tmpdir(), `inillucent-esm-refuse-${process.pid}-${Date.now()}.rdb`);
-  rmSync(path, { force: true });
+  const folder = mkdtempSync(join(tmpdir(), 'inillucent-esm-refuse-'));
+  const path = join(folder, 'test.rdb');
   const db = connect(path);
   try {
     assert.throws(() => db.execute('ATTACH DATABASE ? AS vault', ['vault.rdb']), (why) => {
@@ -59,7 +59,7 @@ test('an unsupported refusal arrives as its own error type', () => {
     });
   } finally {
     db.close();
-    rmSync(path, { force: true });
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 

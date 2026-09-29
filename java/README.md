@@ -72,7 +72,10 @@ email now: grace@example.com
 ```
 
 `Database` and `Connection` are both `AutoCloseable`. Closing the database closes every connection on
-it first, because the C library refuses to close a database that still has connections open.
+it first, because the C library refuses to close a database that still has connections open. A
+`Statement` or `Transaction` that is still open keeps its connection alive, so closing the database
+then fails with `Status.INVALID_STATE`. The database stays open and usable, and closing it again
+works once the statement or transaction is closed.
 
 ## Reading rows
 
@@ -227,4 +230,17 @@ java --enable-native-access=ALL-UNNAMED \
 `node ../scripts/test-all.mjs` does both steps for you.
 
 It runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust
-driver runs.
+driver runs. Set `INILLUCENT_SUITE` to a path to run a different copy of the suite.
+
+`com.inillucent.IntegrationTest` runs every scenario in
+[`conformance/integration.md`](../conformance/integration.md): opening, closing and reopening a file,
+transactions, prepared statements, backups, a cancel from another thread, and a second process
+writing the same file. Each scenario uses a real database in its own temporary folder. It is also a
+`main` method, and it exits with 1 when any scenario fails:
+
+```sh
+java --enable-native-access=ALL-UNNAMED \
+     -Dinillucent.repository=$(pwd) \
+     -cp java/out/classes \
+     com.inillucent.IntegrationTest
+```

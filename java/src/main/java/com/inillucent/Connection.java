@@ -210,13 +210,19 @@ public final class Connection implements AutoCloseable {
         return database;
     }
 
-    /** Frees the connection. Closing twice is safe. */
+    /**
+     * Frees the connection. Closing twice is safe.
+     *
+     * The handle becomes the C null pointer rather than Java null, so a later
+     * call reaches the engine and fails with Status.INVALID_STATE instead of
+     * throwing a NullPointerException from inside the downcall.
+     */
     @Override
     public void close() {
-        if (handle == null) {
+        if (handle.equals(MemorySegment.NULL)) {
             return;
         }
         driver.callVoid("inillucent_conn_free", handle);
-        handle = null;
+        handle = MemorySegment.NULL;
     }
 }

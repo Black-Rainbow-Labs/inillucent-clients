@@ -12,9 +12,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use inillucent::{Database, Error, Rows, Status, Value};
 use serde_json::Value as Json;
 
-/// Returns the path of the shared conformance suite.
+/// The capabilities this runner has. It holds a real connection for the whole
+/// case, so a session outlives each step.
+const CAPABILITIES: &[&str] = &["session"];
+
+/// Returns the path of the conformance suite.
+///
+/// `INILLUCENT_SUITE` names another suite file, which is how a check proves this
+/// runner fails when an expected value is changed.
 fn suite_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("conformance").join("suite.json")
+    match std::env::var("INILLUCENT_SUITE") {
+        Ok(named) if !named.is_empty() => PathBuf::from(named),
+        _ => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("conformance").join("suite.json"),
+    }
+}
+
+/// Returns whether this runner has every capability a case needs.
+///
+/// @param case - one entry from the suite's cases
+fn runnable(case: &Json) -> bool {
+    case.get("needs")
+        .and_then(Json::as_array)
+        .map(|needs| needs.iter().all(|need| CAPABILITIES.contains(&need.as_str().unwrap_or_default())))
+        .unwrap_or(true)
 }
 
 /// Reads a value out of the suite's one key object form.
@@ -28,6 +48,8 @@ fn value_of(described: &Json) -> Value {
         return Value::Null;
     }
     if let Some(whole) = described.get("int") {
+        // serde_json keeps a JSON integer as an i64 or u64, never as a double,
+        // so 9223372036854775807 arrives exactly.
         return Value::Integer(whole.as_i64().expect("int must be an integer"));
     }
     if let Some(number) = described.get("real") {
@@ -43,12 +65,17 @@ fn value_of(described: &Json) -> Value {
     panic!("{described} names no value kind");
 }
 
-/// Returns a database path nothing else is using.
+/// Returns a database path nothing else is using, in a folder of its own.
 ///
-/// @param name - the case name, so a leftover file says which case left it
+/// The engine writes log files beside the database file, so the folder is what
+/// gets removed when the case ends. See `remove_database_files`.
+///
+/// @param name - the case name, so a leftover folder says which case left it
 fn scratch_path(name: &str) -> PathBuf {
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    std::env::temp_dir().join(format!("inillucent-conformance-rs-{name}-{stamp}.rdb"))
+    let folder = std::env::temp_dir().join(format!("inillucent-conformance-rs-{name}-{stamp}"));
+    fs::create_dir_all(&folder).expect("the scratch folder must be created");
+    folder.join("case.rdb")
 }
 
 /// Checks the rows a successful step handed back.
@@ -214,7 +241,7 @@ fn run_case(case: &Json) -> Vec<String> {
         }
     }
 
-    let _ = fs::remove_file(&path);
+    remove_database_files(&path);
     wrong
 }
 
@@ -227,8 +254,14 @@ fn the_conformance_suite_passes() {
 
     let mut failures = Vec::new();
     let cases = suite["cases"].as_array().expect("the suite must have cases");
+    let mut ran = 0;
     for case in cases {
         let name = case["name"].as_str().unwrap_or("unnamed");
+        if !runnable(case) {
+            println!("  skipping  {name}: needs {}", case["needs"]);
+            continue;
+        }
+        ran += 1;
         let wrong = run_case(case);
         println!("  {}  {name}", if wrong.is_empty() { "ok  " } else { "FAIL" });
         for problem in &wrong {
@@ -236,6 +269,7 @@ fn the_conformance_suite_passes() {
             failures.push(format!("{name}: {problem}"));
         }
     }
+    println!("\n  {ran} of {} cases", cases.len());
 
     assert!(
         failures.is_empty(),
@@ -271,19 +305,12 @@ fn the_capability_table_can_be_read() {
     );
 }
 
-/// Removes a database file and every write ahead log file beside it.
+/// Removes the scratch folder a database was made in, with every log file in it.
 ///
-/// @param path - the database file
+/// @param path - the database file, from `scratch_path`
 fn remove_database_files(path: &std::path::Path) {
-    let name = path.file_name().unwrap().to_string_lossy().to_string();
-    let _ = fs::remove_file(path);
-    if let Ok(entries) = fs::read_dir(path.parent().unwrap()) {
-        for entry in entries.flatten() {
-            let other = entry.file_name().to_string_lossy().to_string();
-            if other.starts_with(&format!("{name}-wal")) {
-                let _ = fs::remove_file(entry.path());
-            }
-        }
+    if let Some(folder) = path.parent() {
+        let _ = fs::remove_dir_all(folder);
     }
 }
 

@@ -154,13 +154,27 @@ So [`test/commonjs.test.cjs`](test/commonjs.test.cjs) runs the whole conformance
 `require()`, and [`test/esm.test.mjs`](test/esm.test.mjs) checks the ES module entry and then asserts
 that both entry points report the same driver loaded from the same file.
 
+[`test/integration.test.cjs`](test/integration.test.cjs) and
+[`test/integration.test.mjs`](test/integration.test.mjs) are the same short integration test, one
+per module system. Each opens a real file in a temporary folder, writes, closes, reopens and reads
+it, commits a transaction and watches a failing one roll back, checks the error types, and cancels
+a running statement. The full set of integration scenarios runs in
+[`../typescript/test/integration.test.js`](../typescript/test/integration.test.js).
+
 ```sh
 npm --prefix javascript install
 npm --prefix javascript test
 ```
+
+Build the package in `../typescript` first, because these tests load its `dist/` folder.
 
 ## Async
 
 Every call is synchronous. The engine runs a statement whole, so there is nothing to await, and an
 async wrapper would add a microtask per row for no gain. Put a long query on a worker thread if it
 must not block the event loop.
+
+The one exception is a statement you may want to stop. `executeAsync` runs it on a worker thread and
+returns a promise, so `cancel()` can be called while it runs. The statement then fails with status
+`Status.Interrupted` and the connection stays usable. See the Threads section of
+[`../typescript/README.md`](../typescript/README.md#threads).

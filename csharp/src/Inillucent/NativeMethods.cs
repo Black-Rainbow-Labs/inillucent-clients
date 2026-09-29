@@ -11,8 +11,15 @@ internal static class NativeMethods
     /// <summary>The logical name the resolver maps to a real file.</summary>
     internal const string Library = "inillucent_driver_capi";
 
-    /// <summary>The ABI this package was written against. Only the major has to match.</summary>
+    /// <summary>The ABI this package was written against. The major has to match.</summary>
     internal const uint AbiMajor = 1;
+
+    /// <summary>
+    /// The oldest ABI this package can call, as major*1000000 + minor*1000 + patch.
+    /// 1.1.0 is the first with inillucent_open_with_key, which Database.Open calls
+    /// whenever a key is given.
+    /// </summary>
+    internal const uint AbiMinimum = 1_001_000;
 
     /// <summary>The largest limit the C ABI accepts, which is every row.</summary>
     internal const ulong NoLimit = ulong.MaxValue;

@@ -23,7 +23,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/bundle-cjs.mjs",
-    "test": "npm run build && node --test test/conformance.test.js",
+    "test": "npm run build && node --test test/conformance.test.js test/integration.test.js",
+    "integration": "npm run build && node --test test/integration.test.js",
     "conformance": "npm run build && node --test test/conformance.test.js"
   },
   "dependencies": {

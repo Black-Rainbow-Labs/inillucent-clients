@@ -332,43 +332,66 @@ func (stmt *Stmt) ExecLimit(limit uint64, params ...any) (*Rows, error) {
 
 // Bind binds one value at a one based parameter position.
 //
+// The engine refuses an index past the statement's last parameter with
+// StatusInvalidState, so binding more values than the SQL has placeholders
+// fails here rather than dropping the extra value without a word.
+//
 // @param index - the one based parameter position
 // @param value - what to bind
 func (stmt *Stmt) Bind(index uint32, value any) error {
+	status, err := stmt.bindValue(index, value)
+	if err != nil {
+		return err
+	}
+	if status != 0 {
+		return &Error{
+			Status: Status(status),
+			Message: "binding a value to ?" + itoa(int(index)) + " was refused. The statement " +
+				"may have fewer parameters than the values given, or it may be closed",
+			Offset: -1,
+		}
+	}
+	return nil
+}
+
+// bindValue makes the C bind call that matches the Go type, and returns its
+// status.
+//
+// @param index - the one based parameter position
+// @param value - what to bind
+func (stmt *Stmt) bindValue(index uint32, value any) (int32, error) {
 	switch held := value.(type) {
 	case nil:
-		stmt.calls.bindNull(stmt.handle, index)
+		return stmt.calls.bindNull(stmt.handle, index), nil
 	case bool:
 		whole := int64(0)
 		if held {
 			whole = 1
 		}
-		stmt.calls.bindInt(stmt.handle, index, whole)
+		return stmt.calls.bindInt(stmt.handle, index, whole), nil
 	case int:
-		stmt.calls.bindInt(stmt.handle, index, int64(held))
+		return stmt.calls.bindInt(stmt.handle, index, int64(held)), nil
 	case int32:
-		stmt.calls.bindInt(stmt.handle, index, int64(held))
+		return stmt.calls.bindInt(stmt.handle, index, int64(held)), nil
 	case int64:
-		stmt.calls.bindInt(stmt.handle, index, held)
+		return stmt.calls.bindInt(stmt.handle, index, held), nil
 	case uint64:
-		stmt.calls.bindInt(stmt.handle, index, int64(held))
+		return stmt.calls.bindInt(stmt.handle, index, int64(held)), nil
 	case float32:
-		stmt.calls.bindReal(stmt.handle, index, float64(held))
+		return stmt.calls.bindReal(stmt.handle, index, float64(held)), nil
 	case float64:
-		stmt.calls.bindReal(stmt.handle, index, held)
+		return stmt.calls.bindReal(stmt.handle, index, held), nil
 	case string:
 		bytes := []byte(held)
-		stmt.calls.bindText(stmt.handle, index, neverNil(bytes), uintptr(len(bytes)))
+		return stmt.calls.bindText(stmt.handle, index, neverNil(bytes), uintptr(len(bytes))), nil
 	case []byte:
-		stmt.calls.bindBlob(stmt.handle, index, neverNil(held), uintptr(len(held)))
-	default:
-		return fmt.Errorf(
-			"cannot bind a %T. The engine stores NULL, integers, reals, text and bytes, and "+
-				"converting anything else would be this library deciding what your value means",
-			value,
-		)
+		return stmt.calls.bindBlob(stmt.handle, index, neverNil(held), uintptr(len(held))), nil
 	}
-	return nil
+	return 0, fmt.Errorf(
+		"cannot bind a %T. The engine stores NULL, integers, reals, text and bytes, and "+
+			"converting anything else would be this library deciding what your value means",
+		value,
+	)
 }
 
 // neverNil returns a pointer that is never nil for the bytes being bound.

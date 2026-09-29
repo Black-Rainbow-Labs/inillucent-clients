@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Runs conformance/suite.json against this client.
@@ -21,6 +22,14 @@ import java.util.Map;
  * nothing on the classpath but this client.
  */
 public final class ConformanceTest {
+
+    /**
+     * The capabilities this runner has, as suite.json names them. Every
+     * Connection holds one real session across a case's steps, so a
+     * transaction, a savepoint or a temporary table survives from one step to
+     * the next.
+     */
+    private static final Set<String> CAPABILITIES = Set.of("session");
 
     private ConformanceTest() {
     }
@@ -44,10 +53,16 @@ public final class ConformanceTest {
         List<Object> cases = (List<Object>) suite.get("cases");
 
         List<String> failures = new ArrayList<>();
+        int ran = 0;
         for (Object entry : cases) {
             @SuppressWarnings("unchecked")
             Map<String, Object> theCase = (Map<String, Object>) entry;
             String name = String.valueOf(theCase.getOrDefault("name", "(unnamed)"));
+            if (!runnable(theCase)) {
+                System.out.println("  skipping  " + name + ": it needs " + theCase.get("needs"));
+                continue;
+            }
+            ran++;
             List<String> wrong = runCase(theCase);
             System.out.println("  " + (wrong.isEmpty() ? "ok  " : "FAIL") + "  " + name);
             for (String problem : wrong) {
@@ -60,14 +75,40 @@ public final class ConformanceTest {
         failures.addAll(checkEncryptedDatabase());
 
         System.out.println();
-        System.out.println(cases.size() + " cases, " + failures.size() + " failures");
+        System.out.println(ran + " of " + cases.size() + " cases, " + failures.size() + " failures");
         if (!failures.isEmpty()) {
             System.exit(1);
         }
     }
 
-    /** Returns the path of the shared conformance suite. */
+    /**
+     * Reports whether this runner has every capability a case needs.
+     *
+     * @param theCase - one entry from the suite's cases
+     */
+    private static boolean runnable(Map<String, Object> theCase) {
+        @SuppressWarnings("unchecked")
+        List<Object> needs = (List<Object>) theCase.getOrDefault("needs", List.of());
+        for (Object needed : needs) {
+            if (!CAPABILITIES.contains(String.valueOf(needed))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns the path of the suite to run: INILLUCENT_SUITE when it is set, and
+     * conformance/suite.json in the repository otherwise.
+     *
+     * Json reads every whole number with Long.parseLong, never through a
+     * double, so 9223372036854775807 and 9223372036854775806 stay different.
+     */
     private static Path suitePath() {
+        String named = System.getenv("INILLUCENT_SUITE");
+        if (named != null && !named.isEmpty()) {
+            return Paths.get(named).toAbsolutePath().normalize();
+        }
         String repository = System.getProperty("inillucent.repository");
         Path root = repository == null || repository.isEmpty()
             ? Paths.get("").toAbsolutePath().resolve("..")

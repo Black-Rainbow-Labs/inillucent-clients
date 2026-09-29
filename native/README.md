@@ -30,6 +30,11 @@ node scripts/fetch-native.mjs               # looks for the engine next to this 
 node scripts/fetch-native.mjs <engine-path> # or say where it is
 ```
 
+If the build used `CARGO_TARGET_DIR`, set the same variable when you run
+`fetch-native.mjs`. It looks there first, and then in the engine's own `target`
+folder, and copies the newest library it finds. Without it the script copies
+whatever older library is still sitting in the engine's `target` folder.
+
 ## How each library finds it
 
 The search order is the same in all eight languages, so an application that

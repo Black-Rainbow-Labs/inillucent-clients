@@ -56,20 +56,38 @@ export function searchPaths(): string[] {
 }
 
 /**
- * Returns the path of the shared library, or throws saying where it looked.
+ * Returns the error for a shared library that is in none of the four places.
  *
  * A message that names every place it tried is the difference between a problem
  * somebody can fix and one they have to guess at.
  */
-export function resolveLibrary(): string {
-  for (const candidate of searchPaths()) if (existsSync(candidate)) return candidate;
-  throw new DriverLoadError(
+function notFound(): DriverLoadError {
+  return new DriverLoadError(
     'cannot find the inillucent driver shared library. Looked in:\n  ' +
       searchPaths().join('\n  ') +
+      `\n  ${libraryNames().join(', ')} on the operating system's library search path` +
       '\nBuild it with\n' +
       '  cargo build --release --manifest-path <engine>/Cargo.toml -p inillucent-driver-capi\n' +
       'then run scripts/fetch-native.mjs, or set INILLUCENT_DRIVER_LIB to its path.',
   );
+}
+
+/**
+ * Loads the shared library from the first of the four places that has it.
+ *
+ * The first three are paths checked on disk. The fourth is the operating
+ * system's own library search path, which only the loader can check, so the
+ * bare file name is handed to it and a failure there is the not found error.
+ */
+function loadLibrary(): { lib: { func: (signature: string) => unknown }; path: string } {
+  const found = searchPaths().find((candidate) => existsSync(candidate));
+  if (found) return { lib: koffi.load(found), path: found };
+  const name = libraryNames()[0];
+  try {
+    return { lib: koffi.load(name), path: name };
+  } catch {
+    throw notFound();
+  }
 }
 
 export type DriverFunctions = Record<string, (...args: never[]) => unknown>;
@@ -155,8 +173,7 @@ let loaded: { calls: Record<string, Function>; path: string } | undefined;
  */
 export function driver(): { calls: Record<string, Function>; path: string } {
   if (loaded) return loaded;
-  const path = resolveLibrary();
-  const lib = koffi.load(path);
+  const { lib, path } = loadLibrary();
   const calls = declare(lib);
   const reported = calls.abi_version() as number;
   const major = Math.floor(reported / 1_000_000);

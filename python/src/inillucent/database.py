@@ -14,6 +14,7 @@ from typing import Any, List, Optional, Sequence
 
 from ._check import check
 from ._library import lib
+from .errors import InillucentError, status_name
 from .rows import Rows, decode
 
 OPEN_CREATE = 0x0001
@@ -126,33 +127,49 @@ class Statement:
         """Bind one value, choosing the call by the Python type.
 
         bool is checked before int because it is a subclass of it, and binding
-        True as text would be a quietly different value.
+        True as text would be a quietly different value. The engine refuses an
+        index of 0, or one past the statement's parameter count, with
+        INVALID_STATE. That refusal is raised, so a value with no placeholder is
+        never dropped without a word.
+
+        @param index - the one based parameter position
+        @param value - what to bind
+        """
+        status = self._bind_native(index, value)
+        if status != 0:
+            raise InillucentError(
+                status,
+                f"binding parameter {index} failed with {status_name(status)}: the statement "
+                "has no parameter at that position",
+            )
+
+    def _bind_native(self, index: int, value: Any) -> int:
+        """Call the bind function that matches the Python type and return its status.
 
         @param index - the one based parameter position
         @param value - what to bind
         """
         library = lib()
         if value is None:
-            library.inillucent_bind_null(self._handle, index)
-        elif isinstance(value, bool):
-            library.inillucent_bind_int(self._handle, index, int(value))
-        elif isinstance(value, int):
-            library.inillucent_bind_int(self._handle, index, value)
-        elif isinstance(value, float):
-            library.inillucent_bind_real(self._handle, index, value)
-        elif isinstance(value, str):
+            return library.inillucent_bind_null(self._handle, index)
+        if isinstance(value, bool):
+            return library.inillucent_bind_int(self._handle, index, int(value))
+        if isinstance(value, int):
+            return library.inillucent_bind_int(self._handle, index, value)
+        if isinstance(value, float):
+            return library.inillucent_bind_real(self._handle, index, value)
+        if isinstance(value, str):
             raw = value.encode("utf-8")
-            library.inillucent_bind_text(self._handle, index, raw, len(raw))
-        elif isinstance(value, (bytes, bytearray, memoryview)):
+            return library.inillucent_bind_text(self._handle, index, raw, len(raw))
+        if isinstance(value, (bytes, bytearray, memoryview)):
             raw = bytes(value)
             buffer = (c_uint8 * len(raw)).from_buffer_copy(raw) if raw else (c_uint8 * 0)()
-            library.inillucent_bind_blob(self._handle, index, buffer, len(raw))
-        else:
-            raise TypeError(
-                f"cannot bind a {type(value).__name__}. The engine stores NULL, integers, "
-                "reals, text and bytes, and converting anything else would be this library "
-                "deciding what your value means."
-            )
+            return library.inillucent_bind_blob(self._handle, index, buffer, len(raw))
+        raise TypeError(
+            f"cannot bind a {type(value).__name__}. The engine stores NULL, integers, "
+            "reals, text and bytes, and converting anything else would be this library "
+            "deciding what your value means."
+        )
 
     def close(self) -> None:
         """Free the statement."""
@@ -297,14 +314,24 @@ class Connection:
         """Free the connection, and the database too when this connection owns it.
 
         A connection from `connect()` owns its database, because the caller was
-        never handed one to close. The handle is cleared before the database is
-        closed, so the database closing its connections back does not recurse.
+        never handed one to close. When the engine refuses to close that
+        database because a statement or transaction made on it is still alive,
+        the error is raised and the database stays open, so calling close again
+        after freeing the statement closes it.
+        """
+        self._free()
+        if self._owns_database:
+            self._database.close()
+
+    def _free(self) -> None:
+        """Free this connection's handle and nothing else.
+
+        The database calls this when it closes, so closing does not recurse back
+        into the database.
         """
         if self._handle:
             lib().inillucent_conn_free(self._handle)
             self._handle = None
-            if self._owns_database:
-                self._database.close()
 
     def __enter__(self) -> "Connection":
         return self
@@ -314,7 +341,9 @@ class Connection:
         return False
 
     def __del__(self) -> None:
-        self.close()
+        # The database has its own finaliser, so this frees only the connection.
+        # Closing an owned database from a finaliser could raise during shutdown.
+        self._free()
 
 
 def _open_native(path: str, flags: int, key: Optional[str], handle, error) -> int:
@@ -415,18 +444,21 @@ class Database:
     def close(self) -> None:
         """Checkpoint and close, closing every connection first.
 
-        The C library refuses to close a database that still has connections on
-        it, which is deliberate: freeing it then would leave them pointing at
-        memory that is gone.
+        The C library refuses to close a database while a statement or
+        transaction made on one of its connections is still alive, which is
+        deliberate: freeing it then would leave them pointing at memory that is
+        gone. The handle is kept when the engine refuses, so the database stays
+        open and usable, and a close after freeing the statement works.
         """
         if not self._handle:
             return
         for connection in self._connections:
-            connection.close()
+            connection._free()
         self._connections.clear()
         error = c_void_p()
         status = lib().inillucent_close(self._handle, ctypes.byref(error))
-        self._handle = None
+        if status == 0:
+            self._handle = None
         check(status, error)
 
     def __enter__(self) -> "Database":

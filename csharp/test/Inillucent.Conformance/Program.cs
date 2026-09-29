@@ -29,12 +29,20 @@ public static class Program
         using var suite = JsonDocument.Parse(File.ReadAllText(suitePath));
         var failures = new List<string>();
         var cases = suite.RootElement.GetProperty("cases");
+        var ran = 0;
 
         foreach (var theCase in cases.EnumerateArray())
         {
             var name = theCase.TryGetProperty("name", out var named)
                 ? named.GetString() ?? "(unnamed)"
                 : "(unnamed)";
+            var lacking = Lacking(theCase);
+            if (lacking.Count > 0)
+            {
+                Console.WriteLine($"  skip  {name} (this runner lacks {string.Join(", ", lacking)})");
+                continue;
+            }
+            ran++;
             var wrong = RunCase(theCase, name);
             Console.WriteLine($"  {(wrong.Count == 0 ? "ok  " : "FAIL")}  {name}");
             foreach (var problem in wrong)
@@ -48,8 +56,33 @@ public static class Program
         failures.AddRange(CheckEncryptedDatabase());
 
         Console.WriteLine();
-        Console.WriteLine($"{cases.GetArrayLength()} cases, {failures.Count} failures");
+        Console.WriteLine($"{ran} of {cases.GetArrayLength()} cases, {failures.Count} failures");
         return failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// The capabilities this runner has, out of the suite's `capabilities` list.
+    ///
+    /// It holds one real connection for a whole case, so a transaction, a
+    /// savepoint or a temporary table lasts from one step to the next.
+    /// </summary>
+    private static readonly HashSet<string> Has = ["session"];
+
+    /// <summary>
+    /// Returns the capabilities a case needs that this runner does not have.
+    /// An empty list means the case runs.
+    /// </summary>
+    /// <param name="theCase">one entry from the suite's cases</param>
+    private static List<string> Lacking(JsonElement theCase)
+    {
+        if (!theCase.TryGetProperty("needs", out var needs))
+        {
+            return [];
+        }
+        return needs.EnumerateArray()
+            .Select(need => need.GetString() ?? "")
+            .Where(need => !Has.Contains(need))
+            .ToList();
     }
 
     /// <summary>
@@ -135,9 +168,18 @@ public static class Program
         }
     }
 
-    /// <summary>Returns the path of the shared conformance suite.</summary>
+    /// <summary>
+    /// Returns the path of the shared conformance suite, or the file named by
+    /// INILLUCENT_SUITE when that is set, so a changed copy can be run without
+    /// touching the real one.
+    /// </summary>
     private static string SuitePath()
     {
+        var chosen = Environment.GetEnvironmentVariable("INILLUCENT_SUITE");
+        if (!string.IsNullOrEmpty(chosen))
+        {
+            return Path.GetFullPath(chosen);
+        }
         var repository = Environment.GetEnvironmentVariable("INILLUCENT_REPOSITORY");
         var root = string.IsNullOrEmpty(repository)
             ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."))
@@ -372,11 +414,9 @@ public static class Program
         }
         finally
         {
-            foreach (var file in Directory.GetFiles(directory))
-            {
-                File.Delete(file);
-            }
-            Directory.Delete(directory);
+            // The whole folder goes, including the engine's .rdb-wal files and
+            // anything else it wrote beside the database.
+            Directory.Delete(directory, true);
         }
         return wrong;
     }

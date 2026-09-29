@@ -69,6 +69,32 @@ function run(command, args, cwd, env = {}) {
   return { ok: done.status === 0, said, missing: done.error?.code === 'ENOENT' };
 }
 
+/**
+ * Runs several steps in order and stops at the first that fails, returning the
+ * output of every step that ran, so a client's conformance and integration runs
+ * are reported as one result.
+ * @param steps - functions that each return what run() returns
+ */
+function runInOrder(...steps) {
+  let said = '';
+  for (const step of steps) {
+    const outcome = step();
+    said += outcome.said;
+    if (!outcome.ok) return { ...outcome, said };
+  }
+  return { ok: true, said, missing: false };
+}
+
+/**
+ * Returns how many conformance cases a run reported, as the runner printed it,
+ * for example "33 of 33 cases", or an empty string when it printed none.
+ * @param said - everything the run printed
+ */
+function casesRun(said) {
+  const found = said.match(/(\d+) of (\d+) cases/);
+  return found ? `${found[1]} of ${found[2]} cases` : '';
+}
+
 const javac = jdk ? join(jdk, 'javac') : '';
 const java = jdk ? join(jdk, 'java') : '';
 
@@ -76,9 +102,14 @@ const clients = [
   {
     name: 'python',
     how: 'ctypes',
-    run: () => run('python', [join(repo, 'python', 'tests', 'conformance.py')], repo, {
-      PYTHONPATH: join(repo, 'python', 'src'),
-    }),
+    run: () => {
+      const env = { PYTHONPATH: join(repo, 'python', 'src') };
+      return runInOrder(
+        () => run('python', [join(repo, 'python', 'tests', 'conformance.py')], repo, env),
+        () =>
+          run('python', ['-m', 'pytest', join(repo, 'python', 'tests'), '-q', '-p', 'no:cacheprovider'], repo, env),
+      );
+    },
   },
   {
     name: 'typescript',
@@ -99,7 +130,11 @@ const clients = [
         join(repo, 'typescript'),
       );
       if (!bundled.ok) return bundled;
-      return run(process.execPath, ['--test', 'test/conformance.test.js'], join(repo, 'typescript'));
+      return run(
+        process.execPath,
+        ['--test', 'test/conformance.test.js', 'test/integration.test.js'],
+        join(repo, 'typescript'),
+      );
     },
   },
   {
@@ -108,19 +143,30 @@ const clients = [
     run: () =>
       run(
         process.execPath,
-        ['--test', 'test/commonjs.test.cjs', 'test/esm.test.mjs'],
+        [
+          '--test',
+          'test/commonjs.test.cjs',
+          'test/esm.test.mjs',
+          'test/integration.test.cjs',
+          'test/integration.test.mjs',
+        ],
         join(repo, 'javascript'),
       ),
   },
   {
     name: 'rust',
     how: 'libloading',
-    run: () => run('cargo', ['test', '--manifest-path', join(repo, 'rust', 'Cargo.toml')], repo),
+    // --nocapture so the conformance runner's case count reaches this script;
+    // cargo hides the output of a test that passes.
+    run: () =>
+      run('cargo', ['test', '--manifest-path', join(repo, 'rust', 'Cargo.toml'), '--', '--nocapture'], repo),
   },
   {
     name: 'go',
     how: 'purego',
-    run: () => run(go, ['test', './...'], join(repo, 'go')),
+    // No package argument, so go test streams the output and the runner's case
+    // count reaches this script even when every test passes.
+    run: () => run(go, ['test', '-count=1'], join(repo, 'go')),
   },
   {
     name: 'java',
@@ -137,33 +183,44 @@ const clients = [
       );
       const built = run(javac, ['-d', join(out, 'classes'), '--release', '22', ...files], repo);
       if (!built.ok) return built;
-      return run(
-        java,
-        [
-          '--enable-native-access=ALL-UNNAMED',
-          `-Dinillucent.repository=${repo}`,
-          '-cp',
-          join(out, 'classes'),
-          'com.inillucent.ConformanceTest',
-        ],
-        repo,
+      const runClass = (name) =>
+        run(
+          java,
+          [
+            '--enable-native-access=ALL-UNNAMED',
+            `-Dinillucent.repository=${repo}`,
+            '-cp',
+            join(out, 'classes'),
+            `com.inillucent.${name}`,
+          ],
+          repo,
+        );
+      return runInOrder(
+        () => runClass('ConformanceTest'),
+        () => runClass('IntegrationTest'),
       );
     },
   },
   {
     name: 'csharp',
     how: 'DllImport',
-    run: () =>
-      run(dotnet, ['run', '-v', 'quiet', '--nologo'], join(repo, 'csharp', 'test', 'Inillucent.Conformance'), {
-        INILLUCENT_REPOSITORY: repo,
-        DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-        DOTNET_NOLOGO: '1',
-      }),
+    run: () => {
+      const env = { INILLUCENT_REPOSITORY: repo, DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_NOLOGO: '1' };
+      const project = (name) => join(repo, 'csharp', 'test', name);
+      return runInOrder(
+        () => run(dotnet, ['run', '-v', 'quiet', '--nologo'], project('Inillucent.Conformance'), env),
+        () => run(dotnet, ['run', '-v', 'quiet', '--nologo'], project('Inillucent.Integration'), env),
+      );
+    },
   },
   {
     name: 'php',
     how: 'the FFI extension',
-    run: () => run(php, [join(repo, 'php', 'tests', 'conformance.php')], repo),
+    run: () =>
+      runInOrder(
+        () => run(php, [join(repo, 'php', 'tests', 'conformance.php')], repo),
+        () => run(php, [join(repo, 'php', 'tests', 'integration.php')], repo),
+      ),
   },
 ];
 
@@ -182,7 +239,7 @@ for (const client of clients) {
     continue;
   }
   if (outcome.ok) {
-    console.log(`  ok    ${client.name.padEnd(11)} ${client.how}`);
+    console.log(`  ok    ${client.name.padEnd(11)} ${client.how.padEnd(40)} ${casesRun(outcome.said)}`);
     continue;
   }
   failed += 1;

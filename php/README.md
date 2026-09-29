@@ -248,8 +248,20 @@ under it in one process. Two databases on two files are independent.
 
 ```sh
 php php/tests/conformance.php
+php php/tests/integration.php
 php php/examples/quickstart.php
 ```
 
-It runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust
-driver runs.
+The conformance runner runs [`conformance/suite.json`](../conformance/suite.json), the same file
+the engine's own Rust driver runs. Set `INILLUCENT_SUITE` to another copy of the suite to run that
+one instead.
+
+The integration runner runs every scenario in
+[`conformance/integration.md`](../conformance/integration.md): opening, closing and reopening a
+file, a transaction, a prepared statement run many times, a backup, and a second process writing
+the same file. Each scenario gets its own database in a new temporary folder, and the folder is
+deleted when the scenario ends. PHP cannot make a second call while an FFI call is running in the
+engine, so the part of the cancel scenario that stops a running statement prints a line saying it
+is skipping, and the part that cancels with nothing running still runs.
+
+Both need the FFI extension and exit with a non zero code when anything fails.

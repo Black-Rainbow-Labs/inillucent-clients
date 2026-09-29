@@ -11,6 +11,14 @@ native/*.pdb
 *.rdb
 *.rdb-wal
 *.rdb-journal
+# The engine numbers its log segments: app.rdb-wal.0000000001.
+*.rdb-wal.*
+
+# Coverage data the test runs write.
+.coverage
+.coverage.*
+*.profraw
+coverage.out
 
 # Anything an agent produced while working a ticket.
 _agent_output/

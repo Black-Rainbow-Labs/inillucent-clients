@@ -242,6 +242,25 @@ A wrong key, a key for a plaintext file and no key for an encrypted file all fai
 `Database` is deliberately neither `Send` nor `Sync`. One file is one buffer pool and the engine is
 single threaded, and there is no lock inside. Two databases on two files are independent.
 
+The one call that may come from another thread is a cancel. `Connection::cancel_handle` returns a
+`CancelHandle` that is `Send` and `Sync` and borrows the connection, so use it with
+`std::thread::scope`:
+
+```rust,no_run
+# let database = inillucent::Database::open("app.rdb")?;
+# let connection = database.connect()?;
+let outcome = std::thread::scope(|scope| {
+    let handle = connection.cancel_handle();
+    scope.spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = handle.cancel();
+    });
+    connection.run("SELECT count(*) FROM big_table")
+});
+// outcome is Err with Status::Interrupted when the cancel stopped it
+# Ok::<(), inillucent::Error>(())
+```
+
 ## Running the tests
 
 ```sh
@@ -249,5 +268,15 @@ cargo test --manifest-path rust/Cargo.toml
 cargo run --manifest-path rust/Cargo.toml --example quickstart
 ```
 
-The test runs [`conformance/suite.json`](../conformance/suite.json), the same file the engine's own
-Rust driver runs.
+The first command runs two test files. `tests/conformance.rs` runs
+[`conformance/suite.json`](../conformance/suite.json), the same file the engine's own Rust driver
+runs, and prints how many of its cases ran. Set `INILLUCENT_SUITE` to a path to run another suite
+file instead. `tests/integration.rs` runs every scenario in
+[`conformance/integration.md`](../conformance/integration.md): opening, closing and reopening a
+file, transactions, prepared statements, a backup, a cancel from another thread and a second
+process writing the same file. Each test uses a real database in a new temporary folder and deletes
+the folder when it ends. To run only the integration tests:
+
+```sh
+cargo test --manifest-path rust/Cargo.toml --test integration
+```

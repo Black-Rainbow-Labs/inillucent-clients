@@ -64,8 +64,13 @@ public static class DriverLocator
     /// Returns the clients repository this assembly belongs to.
     ///
     /// INILLUCENT_REPOSITORY is what the repository's own test run sets. Without
-    /// it, a NuGet package on somebody else's machine has no repository to find,
-    /// and INILLUCENT_DRIVER_LIB is the answer for that case.
+    /// it, the folders above the assembly are searched for the one that holds
+    /// native/inillucent_driver.h, which is this repository's root. A fixed number
+    /// of steps up found the csharp folder instead of the root for every project
+    /// in this repository, and so skipped native/ and loaded whatever engine
+    /// build sat beside the checkout. A NuGet package on somebody else's machine
+    /// has no repository to find, and INILLUCENT_DRIVER_LIB is the answer for
+    /// that case.
     /// </summary>
     private static string RepositoryRoot()
     {
@@ -74,7 +79,14 @@ public static class DriverLocator
         {
             return Path.GetFullPath(told);
         }
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
+        {
+            if (File.Exists(Path.Combine(folder.FullName, "native", "inillucent_driver.h")))
+            {
+                return folder.FullName;
+            }
+        }
+        return Path.GetFullPath(AppContext.BaseDirectory);
     }
 
     /// <summary>

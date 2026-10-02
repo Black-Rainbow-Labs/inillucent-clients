@@ -19,7 +19,8 @@ public static partial class Program
         Same(Support.Yes, Driver.Supports("encryption"), "supports(encryption)");
         Same(Support.No, Driver.Supports("load_extension"), "supports(load_extension)");
         Same(Support.Unknown, Driver.Supports("a_capability_nobody_declared"), "supports(a made up name)");
-        Check(Driver.Version().Contains("1.0."), $"the version is {Driver.Version()}");
+        // Any release: this said "1.0." and failed when the engine became 2.0. The ABI is what matters.
+        Check(System.Text.RegularExpressions.Regex.IsMatch(Driver.Version(), @"^inillucent-driver \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+\)$"), $"the version is {Driver.Version()}");
         var abi = Driver.AbiVersion().Split('.').Select(int.Parse).ToArray();
         Check(abi[0] > 1 || (abi[0] == 1 && abi[1] >= 1), $"the ABI version is {Driver.AbiVersion()}");
         Check(File.Exists(Driver.DriverPath()), $"the driver path {Driver.DriverPath()} is not a file");

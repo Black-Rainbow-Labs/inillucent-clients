@@ -55,7 +55,9 @@ final class IntegrationEngine {
         same(Inillucent.supports("encryption"), Support.YES, "supports(encryption)");
         same(Inillucent.supports("load_extension"), Support.NO, "supports(load_extension)");
         same(Inillucent.supports("made_up_name"), Support.UNKNOWN, "supports(made_up_name)");
-        check(Inillucent.version().contains("1.0."), "the version must contain 1.0.");
+        // Any release: this said "1.0." and failed when the engine became 2.0. The ABI is what matters.
+        check(Inillucent.version().matches("inillucent-driver \\d+\\.\\d+\\.\\d+ \\(engine \\d+\\.\\d+\\.\\d+\\)"),
+                "the version must name the driver and the engine: " + Inillucent.version());
         String[] abi = Inillucent.abiVersion().split("\\.");
         int major = Integer.parseInt(abi[0]);
         int minor = Integer.parseInt(abi[1]);

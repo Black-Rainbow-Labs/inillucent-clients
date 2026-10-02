@@ -231,7 +231,12 @@ Every client looks in the same four places, in order:
 3. An engine checkout beside this one, `target/release` then `target/debug`.
 4. The operating system's library search path.
 
-If none of them has it, the error lists all four.
+The TypeScript client, which is published to npm and so has no `native/` folder or engine checkout
+beside it, also looks where the engine's installers put the library, between 3 and 4:
+`~/.local/share/inillucent/lib`, `/usr/local/lib`, and `/opt/homebrew/lib` on macOS or `/usr/lib` on
+Linux, and `%LOCALAPPDATA%\Programs\inillucent\lib` on Windows.
+
+If none of them has it, the error lists every place it looked.
 
 [`native/inillucent_driver.h`](native/inillucent_driver.h) is the C header, so a C or C++ program
 can compile against the same ABI.

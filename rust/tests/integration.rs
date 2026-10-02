@@ -490,7 +490,9 @@ fn capabilities_and_versions() {
     assert_eq!(inillucent::supports("encryption").unwrap(), Support::Yes);
     assert_eq!(inillucent::supports("load_extension").unwrap(), Support::No);
     assert_eq!(inillucent::supports("made_up_capability").unwrap(), Support::Unknown);
-    assert!(inillucent::version().unwrap().contains("1.0."));
+    // Any release: this said "1.0." and failed when the engine became 2.0. The ABI is what matters.
+    let version = inillucent::version().unwrap();
+    assert!(version.starts_with("inillucent-driver ") && version.contains(" (engine "), "{version}");
     let abi: Vec<u32> = inillucent::abi_version().unwrap().split('.').map(|part| part.parse().unwrap()).collect();
     assert!((abi[0], abi[1]) >= (1, 1));
     assert!(Path::new(&inillucent::driver_path().unwrap()).is_file());

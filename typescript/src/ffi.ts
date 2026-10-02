@@ -51,8 +51,29 @@ export function searchPaths(): string[] {
     for (const engine of engines) {
       for (const profile of ['release', 'debug']) found.push(join(engine, 'target', profile, name));
     }
+    for (const installed of installedLibraryDirs()) found.push(join(installed, name));
   }
   return found;
+}
+
+/**
+ * Returns the folders the engine's own installers put the shared library in.
+ *
+ * A package installed from npm has no `native/` folder and no engine checkout beside it, so
+ * before this it found a library someone had installed with the release only when they also set
+ * INILLUCENT_DRIVER_LIB. These are the places install.sh, install.ps1, the macOS package,
+ * Homebrew and the .deb and .rpm write to.
+ */
+function installedLibraryDirs(): string[] {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  if (process.platform === 'win32') {
+    const local = process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local');
+    return [join(local, 'Programs', 'inillucent', 'lib')];
+  }
+  const dirs = [join(home, '.local', 'share', 'inillucent', 'lib'), '/usr/local/lib'];
+  if (process.platform === 'darwin') dirs.push('/opt/homebrew/lib');
+  else dirs.push('/usr/lib');
+  return dirs;
 }
 
 /**

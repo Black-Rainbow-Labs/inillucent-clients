@@ -659,7 +659,8 @@ function capabilities_and_versions(string $folder): void
     same(Support::Yes, Driver::supports('encryption'), 'supports(encryption)');
     same(Support::No, Driver::supports('load_extension'), 'supports(load_extension)');
     same(Support::Unknown, Driver::supports('a_capability_nobody_declared'), 'supports(a made up name)');
-    check(str_contains(Driver::version(), '1.0.'), 'the version is ' . Driver::version());
+    // Any release: this said '1.0.' and failed when the engine became 2.0. The ABI is what matters.
+    check(preg_match('/^inillucent-driver \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+\)$/', Driver::version()) === 1, 'the version is ' . Driver::version());
     check(version_compare(Driver::abiVersion(), '1.1.0', '>='), 'the ABI version is ' . Driver::abiVersion());
     check(is_file(Driver::path()), 'the driver path ' . Driver::path() . ' is not a file');
 }

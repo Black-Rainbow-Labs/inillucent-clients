@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gc
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -415,7 +416,8 @@ def test_capabilities_and_versions():
     assert inillucent.supports("encryption") == inillucent.SUPPORT_YES
     assert inillucent.supports("load_extension") == inillucent.SUPPORT_NO
     assert inillucent.supports("made_up_capability") == inillucent.SUPPORT_UNKNOWN
-    assert "1.0." in inillucent.version()
+    # Any release: this said "1.0." and failed when the engine became 2.0. The ABI is what matters.
+    assert re.fullmatch(r"inillucent-driver \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+\)", inillucent.version())
     major, minor, _ = (int(part) for part in inillucent.abi_version().split("."))
     assert (major, minor) >= (1, 1)
     assert os.path.isfile(inillucent.driver_path())

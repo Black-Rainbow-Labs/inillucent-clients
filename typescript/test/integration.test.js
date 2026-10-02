@@ -479,7 +479,10 @@ test('capabilities_and_versions', () => {
   assert.equal(supports('encryption'), Support.Yes);
   assert.equal(supports('load_extension'), Support.No);
   assert.equal(supports('a_capability_nobody_declared'), Support.Unknown);
-  assert.ok(version().includes('1.0.'), version());
+  // The driver and engine versions, whatever release they are. This said includes('1.0.') and
+  // failed the day the engine became 2.0. What this client depends on is the ABI, checked below.
+  assert.match(version(), /^inillucent-driver \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+\)$/);
+  assert.equal(abiVersion().split('.')[0], '1', `this client binds ABI 1, and the library reports ${abiVersion()}`);
   assert.ok(abiNumber(abiVersion()) >= abiNumber('1.1.0'), abiVersion());
   assert.ok(existsSync(driverPath()), driverPath());
 });
@@ -581,7 +584,7 @@ test('encryption', () =>
  * it, runs a child process that loads it and prints what driverPath() says or
  * what failed, and returns that output.
  * @param folder - an empty temporary folder
- * @param searchPath - the PATH the child process gets, the OS library search path on Windows
+ * @param searchPath - the library search path the child process gets
  */
 function loadFromBareCopy(folder, searchPath) {
   const dist = join(folder, 'pkg', 'dist');
@@ -593,20 +596,56 @@ function loadFromBareCopy(folder, searchPath) {
     '.catch((why) => console.log(why.name + ": " + why.message))';
   // Windows spells the variable Path, so every spelling is replaced by one.
   const env = Object.fromEntries(
-    Object.entries(process.env).filter(([name]) => !/^path$/i.test(name) && name !== 'INILLUCENT_DRIVER_LIB'),
+    Object.entries(process.env).filter(([name]) => !/^path$/i.test(name) && name !== 'INILLUCENT_DRIVER_LIB' && name !== librarySearchVariable),
   );
-  Object.assign(env, { NODE_PATH: resolve(here, '..', 'node_modules'), PATH: searchPath });
+  // The program still has to be found on PATH; the library is found on the variable the
+  // operating system loader reads, which is PATH only on Windows.
+  // The home folders point at the scratch folder, so a library the release installed for this
+  // user is not found in place of the one under test.
+  Object.assign(env, {
+    NODE_PATH: resolve(here, '..', 'node_modules'),
+    PATH: dirname(process.execPath),
+    HOME: folder,
+    USERPROFILE: folder,
+    LOCALAPPDATA: folder,
+  });
+  if (searchPath) env[librarySearchVariable] = librarySearchVariable === 'PATH' ? `${searchPath}${delimiter}${env.PATH}` : searchPath;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env });
   return `${child.stdout}${child.stderr}`;
 }
 
+/**
+ * The variable the operating system loader searches for a bare library name. macOS reads
+ * DYLD_LIBRARY_PATH and never PATH, Linux reads LD_LIBRARY_PATH, and Windows reads PATH. This test
+ * set PATH everywhere, so it passed on Windows and failed on macOS against 2.0.3.
+ */
+const librarySearchVariable = { win32: 'PATH', darwin: 'DYLD_LIBRARY_PATH' }[process.platform] ?? 'LD_LIBRARY_PATH';
+
 test('the shared library is found on the operating system search path, and its absence is named', () =>
   inFolder((folder) => {
-    const nowhere = loadFromBareCopy(join(folder, 'nowhere'), dirname(process.execPath));
-    assert.match(nowhere, /^DriverLoadError: cannot find the inillucent driver shared library/);
-    assert.match(nowhere, /library search path/);
+    // A copy installed for the whole machine is found before the search path, which is right;
+    // this half can only show the error on a machine without one.
+    const systemWide = ['/usr/local/lib', '/usr/lib', '/opt/homebrew/lib'].some((dir) =>
+      ['libinillucent_driver_capi.so', 'libinillucent_driver_capi.dylib'].some((name) => existsSync(join(dir, name))),
+    );
+    if (!systemWide) {
+      const nowhere = loadFromBareCopy(join(folder, 'nowhere'), '');
+      assert.match(nowhere, /^DriverLoadError: cannot find the inillucent driver shared library/);
+      assert.match(nowhere, /library search path/);
+    }
 
-    const onPath = loadFromBareCopy(join(folder, 'on-path'), `${dirname(driverPath())}${delimiter}${dirname(process.execPath)}`);
+    // Where the release's installer put it, which is how a package installed from npm finds a
+    // library installed with install.sh or install.ps1.
+    const installedHome = join(folder, 'installed');
+    const installedDir =
+      process.platform === 'win32'
+        ? join(installedHome, 'Programs', 'inillucent', 'lib')
+        : join(installedHome, '.local', 'share', 'inillucent', 'lib');
+    cpSync(driverPath(), join(installedDir, driverPath().split(/[\\/]/).pop()), { recursive: true });
+    const installed = loadFromBareCopy(installedHome, '');
+    assert.ok(installed.startsWith(`loaded ${installedDir}`), installed);
+
+    const onPath = loadFromBareCopy(join(folder, 'on-path'), dirname(driverPath()));
     assert.match(onPath, /^loaded (inillucent_driver_capi\.dll|libinillucent_driver_capi\.(so|dylib))/);
   }));
 

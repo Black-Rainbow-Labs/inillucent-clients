@@ -21,9 +21,13 @@ npm --prefix typescript install
 npm --prefix typescript run build
 ```
 
-You also need the shared library. See [the shared library](../README.md#the-shared-library) — build
-it once with cargo and run `node scripts/fetch-native.mjs`, or point `INILLUCENT_DRIVER_LIB` at a
-copy you ship yourself.
+You also need the shared library. Installing the engine puts it where this package looks:
+`curl -fsSL https://inillucent.com/downloads/install.sh | sh` on Linux and macOS writes it to
+`~/.local/share/inillucent/lib`, and `install.ps1` on Windows writes it to
+`%LOCALAPPDATA%\Programs\inillucent\lib`. The macOS package, Homebrew, the `.deb` and the `.rpm`
+put it in `/usr/local/lib`, `/opt/homebrew/lib` or `/usr/lib`, which are searched too. Otherwise
+point `INILLUCENT_DRIVER_LIB` at a copy you ship yourself, or see
+[the shared library](../README.md#the-shared-library) to build one.
 
 ## A first program
 

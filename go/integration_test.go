@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -627,8 +628,10 @@ func TestCapabilitiesAndVersions(t *testing.T) {
 		t.Fatal("partial counts as supported and no does not")
 	}
 	version, err := inillucent.Version()
-	if err != nil || !strings.Contains(version, "1.0.") {
-		t.Fatalf("the version is %q (%v) and should contain 1.0.", version, err)
+	// Any release: this said "contains 1.0." and failed the day the engine became 2.0. What this
+	// client depends on is the ABI, checked below.
+	if err != nil || !regexp.MustCompile(`^inillucent-driver \d+\.\d+\.\d+ \(engine \d+\.\d+\.\d+\)$`).MatchString(version) {
+		t.Fatalf("the version is %q (%v) and should name the driver and the engine", version, err)
 	}
 	abi, err := inillucent.ABIVersion()
 	if err != nil || !atLeast(abi, 1, 1, 0) {
